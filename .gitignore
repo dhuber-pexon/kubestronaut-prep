@@ -1,0 +1,26 @@
+# Local / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+*.code-workspace
+.cursor/
+
+# Kind / kubeconfig copies (never commit live configs with secrets)
+cluster/kubeconfig
+*.kubeconfig
+
+# Generated practice (local only — recreate anytime with /create-tasks)
+sessions/*
+!sessions/README.md
+
+# Learner progress / coaching state (local only)
+state/*
+!state/README.md
+!state/progress.example.md
+
+# Temp
+tmp/
+.tmp/
+*.log

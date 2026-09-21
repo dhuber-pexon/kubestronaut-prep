@@ -1,0 +1,12 @@
+# kind cluster config — Kubestronaut lab
+# 1 control-plane + 2 workers (drain, taints, node troubleshooting)
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kubestronaut
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+networking:
+  # Default CNI is fine for NetworkPolicy on kind (kindnet supports NP)
+  disableDefaultCNI: false
