@@ -1,0 +1,20 @@
+{
+  // Container Tools: drive the lab's podman machine (no Docker Desktop).
+  // Containers view → kubestronaut-control-plane → "Attach Shell" = exam "ssh to node".
+  "containers.containerClient": "com.microsoft.visualstudio.containers.podman",
+  "containers.environment": {
+    "CONTAINER_CONNECTION": "kubestronaut-root"
+  },
+
+  // Kubernetes extension: use the repo-local lab kubeconfig, not ~/.kube/config.
+  "vs-kubernetes": {
+    "vs-kubernetes.kubeconfig": "${workspaceFolder}/cluster/kubeconfig",
+    "vs-kubernetes.knownKubeconfigs": ["${workspaceFolder}/cluster/kubeconfig"]
+  },
+
+  // Every integrated terminal in this workspace targets the lab kubeconfig.
+  "terminal.integrated.env.osx": {
+    "KUBECONFIG": "${workspaceFolder}/cluster/kubeconfig",
+    "KIND_EXPERIMENTAL_PROVIDER": "podman"
+  }
+}

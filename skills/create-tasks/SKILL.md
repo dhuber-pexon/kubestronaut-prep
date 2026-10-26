@@ -1,7 +1,7 @@
 ---
 name: create-tasks
 description: >-
-  Generate original CKA/CKS/CKAD exam-style practice challenges under sessions/.
+  Generate original CKS/CKA/CKAD exam-style practice challenges under sessions/.
   Use when the user invokes /create-tasks or asks to create practice tasks,
   drills, or challenges for Kubestronaut prep.
 disable-model-invocation: true
@@ -16,14 +16,14 @@ Generate **original** exam-style challenges. Never recreate leaked exam items. D
 1. Read [state/progress.md](../../state/progress.md) for weak domains and avoid-repeats.
 2. Re-check live curricula (web or fetch) against [cncf/curriculum](https://github.com/cncf/curriculum) and Linux Foundation CKA/CKAD/CKS pages. Refresh domain names if they changed.
 3. Use [reference.md](reference.md) as a **cache** of domain weights — override if the live curriculum differs.
-4. Confirm whether a kind cluster is up (`kubectl cluster-info`). Prefer live-seedable flavors when it is; otherwise file-only tasks still work.
+4. Confirm whether the lab is up (`KUBECONFIG=cluster/kubeconfig kubectl cluster-info`). If hands-on tasks need it and it is down, run `cluster/up.sh` (on demand). If that fails (prereqs missing — never install them), continue with file-only tasks and tell the user to see `/setup-cluster`.
 
 ## Defaults (ask only if the user did not specify)
 
 | Knob | Default |
 |------|---------|
 | Count | 3–5 tasks |
-| Exam mix | CKA + CKS heavy; include 1 CKAD refresh if count ≥ 4 |
+| Exam mix | CKS first, then CKA; include 1 CKAD refresh if count ≥ 4 |
 | Difficulty mix | At least one `exam`, prefer one `killer` if count ≥ 3; rest `warmup`/`exam` |
 | Flavors | Mix ≥ 2 of: greenfield, repair, diagnose, harden, speed |
 
@@ -78,18 +78,23 @@ Session id: `date + short time + -drill` (e.g. `20260814-1050-drill`).
 If flavor is repair/diagnose/harden and the cluster is available:
 
 1. Write `.meta/seed.yaml` (broken or insecure baseline).
-2. Apply with `kubectl apply -f .meta/seed.yaml`.
-3. Tell the user what was seeded (symptoms), not how to fix it.
+2. If the task needs an add-on (Falco, Gatekeeper, kube-bench, Ingress/Gateway controller), run `cluster/addons.sh <name>` first.
+3. Apply with `KUBECONFIG=cluster/kubeconfig kubectl apply -f .meta/seed.yaml`. Node-level seeds (broken apiserver flag, kubelet config) go in via `cluster/node.sh control-plane <cmd>`.
+4. Tell the user what was seeded (symptoms), not how to fix it.
 
 If no cluster: still write `seed.yaml` when useful; note “file-only — apply after `/setup-cluster`”.
 
 ## Domain weighting (bias selection)
 
-See [reference.md](reference.md). Bias toward weak domains from progress. Prefer CKA Troubleshooting and Cluster Architecture; keep CKS tough (supply chain, runtime, microservice vuln, harden).
+See [reference.md](reference.md). Bias toward weak domains from progress. **CKS is the primary goal**: lead with CKS and keep it tough (supply chain, runtime, microservice vuln, cluster/system harden). CKA second: Troubleshooting and Cluster Architecture.
 
-## macOS / kind limits (CKS)
+## Lab limits (CKS)
 
-Prefer in-cluster: PSS, NetworkPolicy, RBAC, SecurityContext, Secrets, image hygiene, ServiceAccount, audit-policy **files**. Host AppArmor/kubelet hardening → file-edit tasks graded from `work/`, not live enforce.
+kind nodes are real kubeadm nodes, so most CKS work is **live** — see the matrix in [cluster/README.md](../../cluster/README.md#live-vs-file-graded).
+
+- **Live:** PSS/PSA, NetworkPolicy, RBAC, SecurityContext, Secrets, ServiceAccount, seccomp (incl. Localhost profiles on nodes), kube-apiserver audit/encryption/admission flags, kubelet config, Ingress TLS / Gateway API (`traefik`), Gatekeeper, kube-bench, Falco, Trivy/kubesec via `cluster/tool.sh`, etcd backup/restore.
+- **Node-file tasks** (apiserver manifest, kubelet config, seccomp profiles, audit policy): tell the learner to work on the node like the exam (`cluster/node.sh` or **Attach Shell** in VS Code) and to keep a copy of edited files / commands in `work/` for grading.
+- **File-graded only:** AppArmor, gVisor/RuntimeClass handlers, host OS hardening (sysctl, modules, users, packages), OS-package kubeadm upgrades. If `addons.sh falco` fails, Falco tasks are file-graded too.
 
 ## After generation
 

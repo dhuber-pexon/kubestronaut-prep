@@ -18,7 +18,7 @@ Target one `sessions/.../tasks/...` (ask if ambiguous).
 ## Allowed reads
 
 - `TASK.md`, `work/**`, `.meta/rubric.md`, `.meta/seed.yaml`
-- Live cluster via kubectl if useful to contrast expected vs actual
+- Live cluster via `KUBECONFIG=cluster/kubeconfig kubectl …` (and node files via `cluster/node.sh control-plane <cmd>`) if useful to contrast expected vs actual — only if already up; don’t start it
 
 **Do not edit `work/`** unless the user explicitly asks you to apply a fix (default: explain only, leave their files alone).
 

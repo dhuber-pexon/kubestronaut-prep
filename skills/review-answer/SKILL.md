@@ -30,7 +30,7 @@ Do **not** edit `work/` or `TASK.md`.
 
 1. Read `TASK.md` and `.meta/rubric.md`.
 2. Inspect all files under `work/` (YAML + `commands.sh`).
-3. Cluster check: run `kubectl cluster-info` (timeout short). If healthy, run the rubric’s kubectl probes. If down, file-grade only and say so.
+3. Cluster check: run `KUBECONFIG=cluster/kubeconfig kubectl cluster-info --request-timeout=5s`. If healthy, run the rubric’s kubectl probes (same `KUBECONFIG`). Node-level CKS checks (apiserver flags, audit log, kubelet config, seccomp profiles) via `cluster/node.sh control-plane|worker|worker2 <cmd>`. If down, file-grade only and say so — do **not** start the cluster for a review.
 4. Score each must-pass and nice-to-have item: **pass** / **fail** / **unclear**.
 5. Overall:
    - **PASS** — all must-pass met

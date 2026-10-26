@@ -4,7 +4,8 @@ Re-verify against [cncf/curriculum](https://github.com/cncf/curriculum) and LF e
 
 ## Focus
 
-- **Primary:** CKA, CKS
+- **Primary:** CKS
+- **Secondary:** CKA
 - **Refresh:** CKAD
 - **Out of v1:** KCNA, KCSA (MCQ)
 
@@ -33,17 +34,19 @@ Re-verify against [cncf/curriculum](https://github.com/cncf/curriculum) and LF e
 | Domain | Weight | Example task angles |
 |--------|--------|---------------------|
 | Minimize Microservice Vulnerabilities | 20% | SecurityContext, PSS, Secrets, SA token, NetworkPolicy |
-| Supply Chain Security | 20% | Image provenance, admission, signed images concepts, Dockerfile/K8s hygiene |
-| Monitoring, Logging and Runtime Security | 20% | Audit policy, falco-style rules as files, runtime alerts |
-| Cluster Setup | 15% | NetworkPolicy defaults, Ingress TLS, CIS-ish baseline as manifests |
-| Cluster Hardening | 15% | API server flags as config files, RBAC least privilege, Pod Security |
-| System Hardening | 10% | kubelet/config file edits (file-grade on kind/macOS), kernel/module notes |
+| Supply Chain Security | 20% | Trivy/kubesec scans (`cluster/tool.sh`), admission (Gatekeeper, ImagePolicyWebhook), signed images concepts, Dockerfile/K8s hygiene |
+| Monitoring, Logging and Runtime Security | 20% | Audit policy + log on the apiserver (live), Falco rules/alerts (`addons.sh falco`), immutability |
+| Cluster Setup | 15% | NetworkPolicy defaults, Ingress TLS (`addons.sh traefik`), kube-bench CIS findings |
+| Cluster Hardening | 15% | kube-apiserver flags via static-pod manifest (live), RBAC least privilege, Pod Security |
+| System Hardening | 10% | kubelet config on nodes (live), seccomp profiles, AppArmor/kernel/module notes (file-grade) |
 
-## kind / macOS guidance
+## Lab guidance (kind on Podman)
 
-**Live-friendly:** Deployments, Services, NetworkPolicy, RBAC, PSS labels, probes, PVCs (local), ConfigMaps/Secrets, Jobs, Ingress (if controller installed — otherwise file-only Ingress).
+**Live-friendly:** Deployments, Services, NetworkPolicy, RBAC, PSS labels, probes, PVCs (local), ConfigMaps/Secrets, Jobs, kube-apiserver audit/encryption/admission flags, kubelet config, seccomp, etcd backup/restore, Ingress/Gateway (after `cluster/addons.sh traefik`), Gatekeeper, Falco, kube-bench.
 
-**File-grade preferred:** kube-apiserver audit policy, kubelet config hardening, AppArmor profiles, node OS packages.
+**File-grade preferred:** AppArmor profiles, gVisor/RuntimeClass handlers, node OS packages and kernel hardening.
+
+Full matrix: [cluster/README.md](../../cluster/README.md#live-vs-file-graded).
 
 ## Flavor × exam cheat sheet
 
@@ -57,9 +60,9 @@ Re-verify against [cncf/curriculum](https://github.com/cncf/curriculum) and LF e
 
 ## Session mix examples
 
-**3-task drill:** CKA diagnose (exam) · CKS harden (killer) · CKAD greenfield (warmup)
+**3-task drill:** CKS harden (killer) · CKS supply-chain or runtime (exam) · CKA diagnose (exam)
 
-**5-task drill:** CKA troubleshooting · CKA networking · CKS supply-chain · CKS runtime/file · CKAD speed
+**5-task drill:** CKS cluster harden · CKS supply-chain · CKS runtime · CKA troubleshooting · CKAD speed
 
 ## Official links
 
