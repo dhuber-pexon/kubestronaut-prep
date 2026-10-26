@@ -1,7 +1,7 @@
 ---
 name: exam-session
 description: >-
-  Create a timed CKA/CKS/CKAD-style mock exam session (~15–17 tasks, ~2h) with
+  Create a timed CKS/CKA/CKAD-style mock exam session (~15–17 tasks, ~2h) with
   domain-weighted mix and scoring sheet. Use when the user invokes /exam-session
   or asks for a full mock exam or timed practice.
 disable-model-invocation: true
@@ -18,17 +18,17 @@ Build a full mock under `sessions/`. Reuse the generation rules from the **creat
 | Duration | 2 hours (remind user; agent does not enforce a timer) |
 | Task count | 15–17 |
 | Points | ~100 total (vary per task 2–8 like real exams) |
-| Exam | Ask once: `cka` · `cks` · `ckad` · `mixed` (default **mixed**: CKA+CKS heavy, 2–3 CKAD) |
+| Exam | Ask once: `cks` · `cka` · `ckad` · `mixed` (default **cks** — the primary goal) |
 
 ## Domain mix targets
 
 **CKA mock:** weight tasks ≈ Troubleshooting 30%, Arch/Install 25%, Networking 20%, Workloads 15%, Storage 10%.
 
-**CKS mock:** ≈ Microservice vuln 20%, Supply chain 20%, Runtime/logging 20%, Cluster setup 15%, Cluster harden 15%, System harden 10% (system harden mostly file-grade).
+**CKS mock:** ≈ Microservice vuln 20%, Supply chain 20%, Runtime/logging 20%, Cluster setup 15%, Cluster harden 15%, System harden 10% (system harden: kubelet/seccomp live on nodes, AppArmor/OS file-grade).
 
 **CKAD mock:** per CKAD weights in create-tasks reference.
 
-**Mixed (default):** ~8 CKA · ~6 CKS · ~2–3 CKAD; include ≥3 diagnose/repair and ≥2 harden; ≥2 killer difficulty.
+**Mixed:** ~8 CKS · ~6 CKA · ~2–3 CKAD; include ≥3 diagnose/repair and ≥2 harden; ≥2 killer difficulty.
 
 ## Procedure
 
@@ -44,7 +44,8 @@ sessions/<YYYYMMDD-HHMM>-exam-<cka|cks|ckad|mixed>/
 ```
 
 4. For each task: same as create-tasks (`TASK.md`, empty `work/`, `.meta/rubric.md`, optional `seed.yaml`).
-5. Seed live cluster only for tasks that need it — and only if kubectl works. Don’t block the whole session on seed failures; note which tasks need manual apply.
+5. Seed live cluster only for tasks that need it. If the lab is down, run `cluster/up.sh` first (on demand); install needed add-ons with `cluster/addons.sh <name>`. Use `KUBECONFIG=cluster/kubeconfig kubectl …`. Don’t block the whole session on seed or startup failures (never install prereqs); note which tasks need manual apply.
+   Remind the user: the lab is torn down when the Claude Code session exits — keep the chat open for the 2h, or start with `KUBESTRONAUT_KEEP_CLUSTER=1`.
 6. Write `SESSION.md` (template below). **No solutions.**
 
 ## SESSION.md template

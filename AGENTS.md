@@ -43,4 +43,10 @@ sessions/<id>/tasks/<nn>-<slug>/
 
 ## Cluster
 
-Prefer the kind lab from `cluster/`. File-grade when the cluster is down. On macOS/kind, prefer in-cluster CKS tasks; host-hardening items are file-graded.
+Focus: **CKS first, CKA second.** Prefer the kind lab from `cluster/` (kind on the `kubestronaut` Podman machine — no Docker). File-grade when the cluster is down.
+
+- Always use the repo-local kubeconfig: `KUBECONFIG=cluster/kubeconfig kubectl …` — never `~/.kube/config`.
+- Start on demand with `cluster/up.sh`; CKS add-ons via `cluster/addons.sh`, scanners via `cluster/tool.sh`.
+- Never install tools or create/delete the podman machine — that is the user's one-time setup (README). If prereqs are missing, point there and fall back to file-only.
+- The lab is ephemeral: Claude Code's `SessionEnd` hook runs `cluster/down.sh`; other agents run it when done.
+- Node-level CKS work (apiserver manifest, kubelet, seccomp) is live via `cluster/node.sh control-plane <cmd>`; AppArmor, gVisor and host OS hardening are file-graded. Matrix: [`cluster/README.md`](cluster/README.md#live-vs-file-graded).

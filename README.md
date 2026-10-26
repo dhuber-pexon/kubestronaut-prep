@@ -12,9 +12,9 @@ Beginners are welcome: you learn by doing, not by reading a second textbook in t
 |------|-----------|---------------------|
 | **KCNA** | Kubernetes and Cloud Native Associate | Multiple-choice style drills |
 | **KCSA** | Kubernetes and Cloud Native Security Associate | Multiple-choice / conceptual security drills |
+| **CKS** | Certified Kubernetes Security Specialist | Hands-on security labs — **primary focus** (hard mode; a few host items file-graded) |
+| **CKA** | Certified Kubernetes Administrator | Hands-on cluster admin labs — secondary focus |
 | **CKAD** | Certified Kubernetes Application Developer | Hands-on YAML + `kubectl` (refresh OK if you already passed) |
-| **CKA** | Certified Kubernetes Administrator | Hands-on cluster admin labs (core focus) |
-| **CKS** | Certified Kubernetes Security Specialist | Hands-on security labs (hard mode; some items file-graded on kind/macOS) |
 
 Together, **KCNA + KCSA + CKAD + CKA + CKS** are the path to the CNCF **Kubestronaut** title (all must be active at once). Ask `/create-tasks` with the cert you care about, e.g. “KCSA questions” or “hard CKS harden tasks”.
 
@@ -25,10 +25,26 @@ Related CNCF certs outside that set (Prometheus, Istio, GitOps, …) are optiona
 ## Prerequisites
 
 - A coding agent that can read this repo  
-- [kubectl](https://kubernetes.io/docs/tasks/tools/)  
-- [kind](https://kind.sigs.k8s.io/) + Docker (recommended for CKA / CKAD / CKS labs)
+- For the hands-on lab (CKS / CKA / CKAD): [Podman](https://podman.io/), [kind](https://kind.sigs.k8s.io/), [kubectl](https://kubernetes.io/docs/tasks/tools/) — **no Docker Desktop needed**
 
-Associate exams (**KCNA**, **KCSA**) work well without a cluster. Performance exams (**CKAD**, **CKA**, **CKS**) are better with the kind lab.
+Associate exams (**KCNA**, **KCSA**) work well without a cluster. Performance exams (**CKS**, **CKA**, **CKAD**) are better with the kind lab.
+
+### One-time Mac setup
+
+You do this once; the repo scripts never install software or create/delete the VM.
+
+```bash
+cd /path/to/kubestronaut-prep             # run from the repo root
+brew install podman kind kubectl          # all Apache-2.0, free
+podman machine init kubestronaut --rootful --cpus 4 --memory 8192 --disk-size 50 \
+  --volume "$PWD:$PWD:ro"
+```
+
+- `--volume "$PWD:$PWD:ro"` replaces Podman's default `$HOME` share: the VM sees **only this repo, read-only** — not the rest of your home directory. If you move the repo, recreate the machine.
+- Nothing else is needed: Helm (for add-on charts), Trivy and kubesec run as throwaway containers inside the VM.
+- Only one podman machine runs at a time — stop any other one before using the lab.
+- In VS Code, reload the window once: the workspace settings point the **Container Tools** extension at Podman and the **Kubernetes** extension + integrated terminals at the lab kubeconfig.
+- Step-by-step checklist: [`next-steps.md`](next-steps.md). Daily loop: [`quick-start.md`](quick-start.md).
 
 ---
 
@@ -64,7 +80,7 @@ Any coding agent that reads [`AGENTS.md`](AGENTS.md) should open the skill file 
 
 | You say | Skill file | What it does |
 |---------|------------|--------------|
-| `/setup-cluster` | [`skills/setup-cluster/SKILL.md`](skills/setup-cluster/SKILL.md) | Create / destroy / check the local kind lab |
+| `/setup-cluster` | [`skills/setup-cluster/SKILL.md`](skills/setup-cluster/SKILL.md) | Create / destroy / check the local kind lab and CKS add-ons |
 | `/create-tasks` | [`skills/create-tasks/SKILL.md`](skills/create-tasks/SKILL.md) | **Create a short drill session** under `sessions/` |
 | `/exam-session` | [`skills/exam-session/SKILL.md`](skills/exam-session/SKILL.md) | **Create a long mock exam session** (~2h) |
 | `/review` | [`skills/review-answer/SKILL.md`](skills/review-answer/SKILL.md) | Grade your `work/` (+ cluster if up) |
@@ -73,10 +89,10 @@ Any coding agent that reads [`AGENTS.md`](AGENTS.md) should open the skill file 
 
 You can add plain English, for example:
 
+- `/create-tasks` CKS harden + NetworkPolicy, killer difficulty  
 - `/create-tasks` focus on CKA troubleshooting, make them hard  
 - `/create-tasks` KCNA multiple-choice, 5 tasks  
 - `/create-tasks` KCSA security concepts  
-- `/create-tasks` CKS harden + NetworkPolicy, killer difficulty  
 - `/review` task 02 in the latest session  
 - `/hint` for harbor-netpol  
 
@@ -87,11 +103,15 @@ You can add plain English, for example:
 ### 0. Optional lab
 
 ```bash
-./cluster/up.sh          # or ask: /setup-cluster
+./cluster/up.sh          # or ask: /setup-cluster (create-tasks also starts it on demand)
+export KUBECONFIG=$PWD/cluster/kubeconfig   # automatic in this workspace's VS Code terminals
 ./cluster/status.sh
+./cluster/addons.sh falco gatekeeper        # optional CKS add-ons (also: kube-bench, traefik)
 ```
 
-Hands-on CKA/CKS tasks are better with a cluster. KCNA-style MCQs work without one.
+Hands-on CKS/CKA tasks are better with a cluster. KCNA-style MCQs work without one.
+
+The lab is **ephemeral and sandboxed**: kind nodes run in the `kubestronaut` Podman VM, your `~/.kube/config` is never touched, and when the Claude Code session exits a hook deletes the cluster and stops the VM (`/clear` keeps it; `KUBESTRONAUT_KEEP_CLUSTER=1` opts out). Other agents: run `./cluster/down.sh` when done. Node access like the exam: `cluster/node.sh`. Details and the live vs file-graded matrix: [`cluster/README.md`](cluster/README.md).
 
 ### 1. Ask the agent to generate work
 
@@ -141,11 +161,13 @@ sessions/20260921-0915-drill/     # local only (gitignored)
 | [`skills/`](skills/) | yes | Agent workflows — how to create/review/hint |
 | [`AGENTS.md`](AGENTS.md) | yes | Hard rules for every agent |
 | [`templates/`](templates/) | yes | Blank TASK + rubric shapes |
-| [`cluster/`](cluster/) | yes | kind lab scripts |
+| [`cluster/`](cluster/) | yes | kind-on-Podman lab scripts, CKS add-ons, CLI tool wrappers |
+| [`.claude/settings.json`](.claude/settings.json) | yes | Claude Code hook: tear the lab down at session end |
+| [`.vscode/`](.vscode/) settings + extensions | yes | Container Tools → Podman, Kubernetes extension + terminals → lab kubeconfig |
 | [`state/README.md`](state/README.md) + example | yes | How learner progress works |
 | `state/progress.md` | **no** | Your scores / weak domains (local) |
 | `sessions/*` | **no** | Generated drills + your answers (local) |
-| `cluster/kubeconfig`, `*.kubeconfig` | **no** | Local cluster credentials |
+| `cluster/kubeconfig`, `*.kubeconfig` | **no** | Lab cluster credentials (created by `up.sh`, removed by `down.sh`) |
 
 ---
 

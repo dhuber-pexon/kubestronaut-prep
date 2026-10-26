@@ -3,11 +3,14 @@
 *.swp
 *~
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 *.code-workspace
 .cursor/
+.claude/settings.local.json
 
-# Kind / kubeconfig copies (never commit live configs with secrets)
+# Lab kubeconfig copies (never commit live configs with secrets)
 cluster/kubeconfig
 *.kubeconfig
 

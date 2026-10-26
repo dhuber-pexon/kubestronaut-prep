@@ -1,12 +1,17 @@
-# kind cluster config — Kubestronaut lab
+# kind cluster config — Kubestronaut lab (runs on the 'kubestronaut' podman machine)
 # 1 control-plane + 2 workers (drain, taints, node troubleshooting)
+# Node image pinned to the CKS curriculum version (cncf/curriculum: CKS v1.34).
+# Bump together with kind releases: https://github.com/kubernetes-sigs/kind/releases
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: kubestronaut
 nodes:
   - role: control-plane
+    image: kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d
   - role: worker
+    image: kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d
   - role: worker
+    image: kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d
 networking:
   # Default CNI is fine for NetworkPolicy on kind (kindnet supports NP)
   disableDefaultCNI: false
