@@ -9,7 +9,7 @@ The short version: **install Podman once, then run `./cks`.** Everything else ha
 | **Install (once)** | **Podman**: download `podman-installer-macos-arm64.pkg` from the official releases page, https://github.com/podman-container-tools/podman/releases (latest stable release, not an `-rc`), and run it. The installer asks for your macOS admin password once. This is the **only** install. Podman is free and open source (Apache-2.0). |
 | **Already in place** | VS Code with the Claude Code extension, signed in to your existing Claude account. That is the only account involved; this project doesn't create one. |
 | **Accounts, logins, tokens** | **None.** No Docker Hub, GitHub, registry, Linux Foundation or cloud login, and no API keys. Images and tools are downloaded anonymously. |
-| **One-time macOS prompt** | On the first start, macOS asks whether Podman's VM helper (shown as *krunkit* or *vfkit*) may access files in your **Documents** folder. Click **Allow**. The VM can only see this project folder. |
+| **One-time macOS prompt** | On the first start, macOS asks whether Podman's VM helper (shown as *krunkit* or *vfkit*) may access files in your **Documents** folder. Click **Allow**. The VM shares only this project folder (and, on Podman 6, Podman's own config folder `~/.config/containers`). |
 | **Optional prompt to skip** | If Podman suggests installing `podman-mac-helper`, skip it; it isn't needed. |
 | **Internet** | First run: about 2–3 GB (VM image, toolbox, Kubernetes node image). Later: only task images and trivy database updates. Outbound downloads only; nothing is exposed. |
 | **Disk / RAM / CPU** | The VM grows to about 15–20 GB (40 GB max) and uses 4 CPUs and 6 GB RAM, **only while the lab runs**. |

@@ -9,7 +9,7 @@ the tasks, gives progressive hints, grades your answers and explains solutions.
 - **One dependency:** Podman (free, Apache-2.0). No Docker Desktop, Homebrew, kubectl or kind on your Mac.
 - **One entry point:** `./cks` in the VS Code terminal. Start, keep and destroy happen in the background.
 - **Strictly local:** nothing is reachable from your network or the internet, and `./cks verify-local` proves it.
-- **Private:** nothing outside this folder is changed; everything else lives in a dedicated Podman VM.
+- **Private:** nothing outside this folder is changed; everything else lives in a dedicated Podman VM that shares only this folder (plus Podman's own config folder, on Podman 6).
 - **Free and open source only:** no accounts, trials, subscriptions or hidden fees.
 
 This is not a notes wiki. Docs stay on [kubernetes.io](https://kubernetes.io/docs/). The curriculum the tasks are built
@@ -83,8 +83,9 @@ Skill definitions: [.claude/skills/](.claude/skills/). Rules for Claude: [CLAUDE
 
 - **Structural:** the toolbox publishes no ports. kind publishes only the API server, on `127.0.0.1`.
   The kubeconfig exists only inside the toolbox and points at the internal network. NodePorts and hostPorts stay inside the VM.
-- **Audited (fail closed):** every start, and `./cks verify-local`, inspect the port bindings and network mode of every lab
-  container and cross-check the Mac's listening sockets. Any binding other than `127.0.0.1` destroys the lab.
+- **Audited (fail closed):** every start, and `./cks verify-local`, inspect the port bindings and network mode of **every**
+  container in the VM, the folders shared with the VM, and the Mac's listening sockets. Any binding other than `127.0.0.1`,
+  or any shared folder other than this one, destroys the lab.
 - **Guarded:** a Claude Code hook ([.claude/hooks/guard.sh](.claude/hooks/guard.sh)) blocks commands that would publish ports,
   open tunnels, install software on the Mac or upload project content. Tests: `bash .claude/hooks/test-guards.sh`.
 - **Contained:**
@@ -96,7 +97,10 @@ Skill definitions: [.claude/skills/](.claude/skills/). Rules for Claude: [CLAUDE
   | Outside both | only Podman's own record of the VM (removed by `./cks purge`), plus the one-time macOS folder permission |
   | Never touched | `~/.kube`, `~/.docker`, shell profiles, `/etc`, Homebrew, launchd, keychain |
 
-- **Claude Code:** project settings deny MCP connectors and Artifacts, ask before web access, and set
+- **Tools:** trivy's telemetry and version checks are switched off in the toolbox. cosign is used with local keys only;
+  add `--use-signing-config=false --tlog-upload=false` when signing, otherwise cosign records the signature in a public log.
+- **Claude Code:** project settings deny MCP connectors, Artifacts and reading credential folders (`~/.ssh`, `~/.aws`, `~/.kube`, …),
+  ask before web access and before `git push`, and set
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (telemetry, error reporting and auto-update checks off, where your Claude Code
   version honours it in project settings). Claude Code keeps its own conversation history in `~/.claude`; that is outside
   this repo's control.

@@ -1,7 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "env": {
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DO_NOT_TRACK": "1"
   },
   "disableArtifact": true,
   "permissions": {
@@ -22,17 +25,31 @@
       "Bash(./cks purge *)",
       "Edit(/sessions/**/work/**)",
       "WebFetch",
-      "WebSearch"
+      "WebSearch",
+      "Bash(git push *)"
     ],
     "deny": [
-      "mcp__*"
+      "mcp__*",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.kube/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.docker/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.config/containers/**)",
+      "Read(~/.netrc)",
+      "Read(~/.local/share/containers/**)"
     ]
   },
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start.sh", "timeout": 20 }
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start.sh",
+            "timeout": 20
+          }
         ]
       }
     ],
@@ -40,7 +57,11 @@
       {
         "matcher": "prompt_input_exit|logout|other",
         "hooks": [
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-end.sh", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-end.sh",
+            "timeout": 10
+          }
         ]
       }
     ],
@@ -48,7 +69,11 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard.sh", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard.sh",
+            "timeout": 10
+          }
         ]
       }
     ]

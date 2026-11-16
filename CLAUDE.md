@@ -57,7 +57,8 @@ There is **no** kubectl, kind, helm, trivy or docker on the Mac, and none may be
   `lab/toolbox/Dockerfile` (pinned, checksum-verified).
 - **Never send repo, session or progress content to an external service:** no gists, pastebins, uploads, or online scanners
   (e.g. the public kubesec.io API). MCP connectors and Artifacts are disabled in project settings.
-- cosign: only local key pairs (`cosign generate-key-pair`). Never keyless/OIDC signing, never a public transparency log.
+- cosign: only local key pairs (`cosign generate-key-pair`). Never keyless/OIDC signing, never a public transparency log:
+  sign with `--use-signing-config=false --tlog-upload=false` and verify with `--insecure-ignore-tlog=true` (check `cosign sign-blob --help` for the pinned version).
 - Web access (WebFetch/WebSearch) asks first. Use it only for docs the learner needs.
 
 ## Free and open source only

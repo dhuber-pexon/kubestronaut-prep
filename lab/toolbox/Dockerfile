@@ -88,6 +88,9 @@ ENV KUBECONFIG=/root/.kube/config \
     KIND_EXPERIMENTAL_PROVIDER=podman \
     CONTAINER_HOST=unix:///run/podman/podman.sock \
     EDITOR=vim \
+    TRIVY_DISABLE_TELEMETRY=true \
+    TRIVY_SKIP_VERSION_CHECK=true \
+    DO_NOT_TRACK=1 \
     LANG=C.UTF-8
 
 COPY rootfs/ /

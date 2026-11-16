@@ -62,6 +62,7 @@ sessions/<YYYYMMDD-HHMM>-drill/
   `nginx:1.29-alpine`, `busybox:1.37`, `alpine:3.22`. **Never Bitnami** (paywalled) and nothing that needs a login.
 - Tooling must be what the lab ships: kubectl, trivy, kubesec, kube-linter, cosign (local keys only), bom, helm (template only),
   etcdctl and kube-bench (on the nodes), Falco (`./cks addon falco`). Nothing needs an account or licence.
+- cosign tasks state that signing must stay offline (no transparency-log upload) and grade that no upload flag was left on.
 - Local only: tasks never publish ports, use `hostNetwork` toward the outside, or upload anything (no public Rekor/tlog,
   no online scanners such as the kubesec.io API).
 

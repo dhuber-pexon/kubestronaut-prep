@@ -183,10 +183,11 @@ image_tags() {
 build_image() {   # tag context [build args…]
   local tag="$1" ctx="$2"; shift 2
   if p image exists "$tag" 2>/dev/null; then return 0; fi
-  say "Building ${tag#localhost/} (first time takes a few minutes; progress: .cks/logs/build.log)…"
-  if ! p build --pull=missing --label "$LABEL" -t "$tag" "$@" "$ctx" >>"$LOGS/build.log" 2>&1; then
-    tail -n 30 "$LOGS/build.log" >&2
-    die "Image build failed (log: .cks/logs/build.log)."
+  say "Building ${tag#localhost/} (first time takes a few minutes; progress: .cks/logs/)…"
+  local blog="$LOGS/build-$(basename "$ctx").log"
+  if ! p build --pull=missing --label "$LABEL" -t "$tag" "$@" "$ctx" >>"$blog" 2>&1; then
+    tail -n 30 "$blog" >&2
+    die "Image build failed (log: .cks/logs/build-$(basename "$ctx").log)."
   fi
   local repo="${tag%:*}" old
   for old in $(p images --filter "reference=$repo" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true); do
@@ -194,10 +195,14 @@ build_image() {   # tag context [build args…]
   done
 }
 
-ensure_images() {
+ensure_images() {   # the two builds are independent: run them in parallel
   image_tags
-  build_image "$TOOLBOX_IMAGE" "$ROOT/lab/toolbox" --build-arg "PODMAN_VERSION=$PODMAN_SERVER_VERSION"
-  build_image "$NODE_IMAGE" "$ROOT/lab/node"
+  ( trap - EXIT; build_image "$NODE_IMAGE" "$ROOT/lab/node" ) &
+  local node_build=$!
+  local rc=0
+  build_image "$TOOLBOX_IMAGE" "$ROOT/lab/toolbox" --build-arg "PODMAN_VERSION=$PODMAN_SERVER_VERSION" || rc=$?
+  wait "$node_build" || rc=$?
+  [ "$rc" = 0 ] || exit 1
 }
 
 ensure_network() {   # lives inside the VM; kind reuses it
@@ -345,11 +350,18 @@ audit_local() {
     if [ "$bad" = 0 ]; then ok "local-only: static config OK (VM not running)"; fi
     return "$bad"
   fi
-  for c in $(lab_nodes) "$TOOLBOX" "$REAPER"; do
-    p container exists "$c" >/dev/null 2>&1 || continue
-    json="$(p inspect -f '{{json .HostConfig.PortBindings}}' "$c" 2>/dev/null || echo '{}')"
-    mode="$(p inspect -f '{{.HostConfig.NetworkMode}}' "$c" 2>/dev/null || true)"
-    puball="$(p inspect -f '{{.HostConfig.PublishAllPorts}}' "$c" 2>/dev/null || true)"
+  # The VM is dedicated to this lab, so EVERY container in it is audited (one engine call).
+  local names rows
+  names="$(p ps -a --format '{{.Names}}' 2>/dev/null || true)"
+  rows=""
+  if [ -n "$names" ]; then
+    # shellcheck disable=SC2086
+    rows="$(p inspect -f '{{.Name}} {{.HostConfig.NetworkMode}} {{.HostConfig.PublishAllPorts}} {{json .HostConfig.PortBindings}}' $names 2>/dev/null || true)"
+    if [ -z "$rows" ]; then finding "could not inspect the lab containers"; bad=1; fi
+  fi
+  while read -r c mode puball json; do
+    [ -n "$c" ] || continue
+    c="${c#/}"
     if [ "$mode" = host ]; then finding "$c uses host networking"; bad=1; fi
     if [ "$puball" = true ]; then finding "$c publishes all ports (-P)"; bad=1; fi
     pairs="$(printf '%s' "$json" | grep -oE '"HostIp":"[^"]*","HostPort":"[0-9]*"' || true)"
@@ -360,7 +372,7 @@ audit_local() {
     for pair in $pairs; do
       hostip="$(printf '%s' "$pair" | sed -E 's/^"HostIp":"([^"]*)".*/\1/')"
       port="$(printf '%s' "$pair" | sed -E 's/.*"HostPort":"([0-9]*)"$/\1/')"
-      if [ "$c" = "$TOOLBOX" ] || [ "$c" = "$REAPER" ]; then
+      if [ "$c" != "$CP" ]; then
         finding "$c must not publish any port (found ${hostip:-0.0.0.0}:$port)"; bad=1; continue
       fi
       if [ "$hostip" != 127.0.0.1 ]; then
@@ -368,7 +380,23 @@ audit_local() {
       fi
       published="$published $port"
     done
-  done
+  done <<EOF
+$rows
+EOF
+  # The VM may share only this project folder (Podman 6 also shares its own config folder).
+  local m mounts
+  mounts="$(pm inspect "$MACHINE" --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' 2>/dev/null || true)"
+  if [ -z "$mounts" ]; then
+    warn "local-only: could not list the folders shared with the VM (check: podman machine inspect $MACHINE)"
+  fi
+  while IFS= read -r m; do
+    case "$m" in
+      ""|"$ROOT"|*/.config/containers|*/containers) ;;
+      *) finding "the VM shares '$m' (only $ROOT is allowed); run ./cks purge, then ./cks"; bad=1 ;;
+    esac
+  done <<EOF
+$mounts
+EOF
   # Cross-check what the Mac itself listens on for those ports.
   for port in $published; do
     addrs="$(netstat -an -p tcp 2>/dev/null | awk -v p=".$port" '$NF=="LISTEN" && substr($4, length($4)-length(p)+1)==p {print $4}' || true)"
@@ -390,7 +418,7 @@ audit_local() {
     done
   done
   if [ "$bad" = 0 ]; then
-    ok "local-only: API published on 127.0.0.1 only (port${published:- none}); toolbox publishes nothing"
+    ok "local-only: only the API is published, on 127.0.0.1 (port${published:- none}); nothing else in the VM publishes a port"
   fi
   return "$bad"
 }
@@ -607,17 +635,27 @@ require_lab() {
   fi
 }
 
-cmd_kubectl() { require_lab; tb kubectl "$@"; }
+cmd_kubectl() {   # no pre-flight checks: one engine call; diagnose only if that call itself fails
+  need_podman
+  local rc=0
+  tb kubectl "$@" || rc=$?
+  if [ "$rc" = 125 ]; then require_lab; fi
+  return "$rc"
+}
 
 cmd_node() {
   [ $# -ge 1 ] || die "usage: ./cks node <cks-control-plane|cks-worker> [-- command…]"
-  require_lab
+  need_podman
   local node="$1"; shift
   case "$node" in
     controlplane|control-plane|cp) node="$CP" ;;
     worker|node01|node) node="$WORKER" ;;
   esac
-  if ! lab_nodes | grep -qx -- "$node"; then die "'$node' is not a node of this lab: $(lab_nodes | tr '\n' ' ')"; fi
+  # Only this lab's node containers are accepted (single engine call).
+  if [ "$(p inspect -f '{{index .Config.Labels "io.x-k8s.kind.cluster"}}' "$node" 2>/dev/null || true)" != "$CLUSTER" ]; then
+    require_lab
+    die "'$node' is not a node of this lab: $(lab_nodes | tr '\n' ' ')"
+  fi
   if [ "${1:-}" = "--" ]; then shift; fi
   local flags="-i"
   if [ -t 0 ] && [ -t 1 ]; then flags="-it"; fi
