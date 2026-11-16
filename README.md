@@ -58,7 +58,7 @@ Skill definitions: [.claude/skills/](.claude/skills/). Rules for Claude: [CLAUDE
 | `./cks kubectl …` / `./cks k …` | kubectl against the lab |
 | `./cks node <node> [-- cmd]` | Shell or command on `cks-control-plane` / `cks-worker` |
 | `./cks seed <session or task>` | Make a session active and apply its seeds (or apply them on the next start) |
-| `./cks addon falco` | Install Falco (best effort; kube-bench is preinstalled on the nodes) |
+| `./cks addon falco` | Install Falco (about 30 s; kube-bench is preinstalled on the nodes) |
 | `./cks reset [session]` | Fresh cluster, then seed the active (or given) session |
 | `./cks up` | Start without a shell |
 | `./cks down` | Destroy the cluster and toolbox, stop the VM |
@@ -77,7 +77,9 @@ Skill definitions: [.claude/skills/](.claude/skills/). Rules for Claude: [CLAUDE
 | ValidatingAdmissionPolicy (permitted registries), ImagePolicyWebhook config | |
 | trivy, kubesec, kube-linter, bom (SBOM), cosign (local keys) | |
 | binary checksum verification, node OS footprint (services, packages, users) | |
-| Falco rules and alerts (`./cks addon falco`, best effort) | |
+| Falco rules and alerts (`./cks addon falco`, modern eBPF) | |
+
+Every row on the left was verified on the real lab: see the results log in [post-podman-steps.md](post-podman-steps.md).
 
 ## Local-only and privacy guarantees
 
@@ -97,8 +99,9 @@ Skill definitions: [.claude/skills/](.claude/skills/). Rules for Claude: [CLAUDE
   | Outside both | only Podman's own record of the VM (removed by `./cks purge`), plus the one-time macOS folder permission |
   | Never touched | `~/.kube`, `~/.docker`, shell profiles, `/etc`, Homebrew, launchd, keychain |
 
-- **Tools:** trivy's telemetry and version checks are switched off in the toolbox. cosign is used with local keys only;
-  add `--use-signing-config=false --tlog-upload=false` when signing, otherwise cosign records the signature in a public log.
+- **Tools:** trivy's telemetry and version checks are switched off in the toolbox. **cosign** and **kubesec** are offline by default:
+  small wrappers make cosign sign with a local signing config (no public transparency log, local keys only) and make kubesec
+  validate against JSON schemas bundled in the image instead of downloading them from GitHub. Tested in a container with no network.
 - **Claude Code:** project settings deny MCP connectors, Artifacts and reading credential folders (`~/.ssh`, `~/.aws`, `~/.kube`, …),
   ask before web access and before `git push`, and set
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (telemetry, error reporting and auto-update checks off, where your Claude Code

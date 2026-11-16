@@ -47,8 +47,11 @@ case "$nz" in *'|'*) rest="${nz#*|}" ;; esac
 if ! printf '%s' "$first" | grep -Eq '^[[:space:]]*\./cks[[:space:]]+(kubectl|k|node|status|verify-local)([[:space:]]|$)'; then
   deny "only ./cks kubectl|k|node|status|verify-local are allowed."
 fi
+# `auth can-i` / `auth whoami` only ask the API ("may X delete Y?") and are allowed, but only directly after
+# kubectl; otherwise "kubectl delete pod x auth can-i" would pass as a disguised delete.
 if printf '%s' "$first" | grep -Eq '^[[:space:]]*\./cks[[:space:]]+(kubectl|k)[[:space:]]' \
-   && printf '%s' "$first" | grep -Eq '[[:space:]](apply|create|delete|edit|patch|replace|scale|label|annotate|set|drain|cordon|uncordon|taint|rollout|expose|autoscale|debug|cp|run|certificate|proxy|port-forward|attach)([[:space:]]|$)'; then
+   && ! printf '%s' "$first" | grep -Eq '^[[:space:]]*\./cks[[:space:]]+(kubectl|k)[[:space:]]+auth[[:space:]]+(can-i|whoami)([[:space:]]|$)' \
+   && printf '%s' "$first" | grep -Eq '[[:space:]](apply|create|delete|edit|patch|replace|scale|label|annotate|set|drain|cordon|uncordon|taint|rollout|expose|autoscale|debug|cp|run|certificate|proxy|port-forward|attach|reconcile)([[:space:]]|$)'; then
   deny "kubectl verbs that change the cluster are not allowed while grading (use get/describe/auth can-i/exec)."
 fi
 if printf '%s' "$first" | grep -Eq '^[[:space:]]*\./cks[[:space:]]+node[[:space:]]' \

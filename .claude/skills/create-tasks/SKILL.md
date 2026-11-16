@@ -45,7 +45,7 @@ sessions/<YYYYMMDD-HHMM>-drill/
     01-<slug>/
       TASK.md                # from templates/TASK.md: scenario only, NO solution
       given/                 # optional starter files (Dockerfile, broken manifest, audit-log excerpt, …)
-      work/.gitkeep          # empty: the learner's space
+      work/                  # empty folder, create it with mkdir: the learner's space (never write files here)
       .meta/rubric.md        # from templates/rubric.md: observable checks only
       .meta/seed.sh          # optional, from templates/seed.sh: idempotent lab setup
 ```
@@ -62,7 +62,8 @@ sessions/<YYYYMMDD-HHMM>-drill/
   `nginx:1.29-alpine`, `busybox:1.37`, `alpine:3.22`. **Never Bitnami** (paywalled) and nothing that needs a login.
 - Tooling must be what the lab ships: kubectl, trivy, kubesec, kube-linter, cosign (local keys only), bom, helm (template only),
   etcdctl and kube-bench (on the nodes), Falco (`./cks addon falco`). Nothing needs an account or licence.
-- cosign tasks state that signing must stay offline (no transparency-log upload) and grade that no upload flag was left on.
+- cosign tasks use local keys only. The toolbox signs offline by default; verification needs `--insecure-ignore-tlog=true`.
+  Never ask the learner to pass a different `--signing-config` or to sign keyless.
 - Local only: tasks never publish ports, use `hostNetwork` toward the outside, or upload anything (no public Rekor/tlog,
   no online scanners such as the kubesec.io API).
 

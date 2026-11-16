@@ -83,7 +83,7 @@ fi
 
 # --- per-command checks (split on ; & |) ----------------------------------------------------
 # Quote-aware split: separators inside quotes (e.g. sh -c 'a && b' run inside a container) are not
-# command boundaries on the Mac. Quote characters are dropped, quoted ; & | become "_".
+# command boundaries on the Mac. Quote characters are dropped, quoted ; & | and spaces become "_".
 nz="$(printf '%s' "$flat" | awk -v q="'" '{
   s = $0; out = ""; st = 0
   for (i = 1; i <= length(s); i++) {
@@ -95,7 +95,7 @@ nz="$(printf '%s' "$flat" | awk -v q="'" '{
     } else if ((st == 1 && c == q) || (st == 2 && c == "\"")) {
       st = 0
     } else {
-      out = out ((c ~ /[|;&]/) ? "_" : c)
+      out = out ((c ~ /[|;& ]/) ? "_" : c)   # a quoted string stays one word
     }
   }
   print out

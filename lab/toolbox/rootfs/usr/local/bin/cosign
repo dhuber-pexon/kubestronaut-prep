@@ -1,0 +1,17 @@
+#!/bin/sh
+# cosign, offline by default. With cosign 3, signing normally uploads to Sigstore's PUBLIC
+# transparency log (and keyless signing needs an online identity). In this lab every signing
+# command gets a local signing config with no transparency log, no timestamp authority and no
+# certificate authority, so signatures stay on this machine and only local keys work.
+# Verify offline bundles with:  cosign verify-blob --key cosign.pub --bundle <b> --insecure-ignore-tlog=true <file>
+REAL=/usr/local/lib/cosign/cosign
+OFFLINE=/etc/cosign/offline-signing-config.json
+case "${1:-}" in
+  sign|sign-blob|attest|attest-blob)
+    sub="$1"; shift
+    case " $* " in
+      *" --signing-config"*) exec "$REAL" "$sub" "$@" ;;
+    esac
+    exec "$REAL" "$sub" --signing-config "$OFFLINE" "$@" ;;
+esac
+exec "$REAL" "$@"

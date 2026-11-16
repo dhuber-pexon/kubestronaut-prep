@@ -80,6 +80,10 @@ B 'cd sessions && kubectl get po'
 B 'podman run -p "8080:80" nginx'
 B "podman run -d -p '0.0.0.0:9000:80' nginx"
 B 'true; trivy image nginx'
+# F7: a quoted assignment value is one word, not a command
+A 'K="./cks kubectl"; $K get nodes'
+A "MSG='use kubectl via ./cks' ./cks status"
+B 'K=x kubectl get nodes'
 
 # --- grader-guard.sh ---
 GA './cks kubectl get networkpolicy -n team-a -o yaml'
@@ -103,6 +107,11 @@ GB './cks node cks-worker -- grep "$(./cks reset)" /etc/a'
 GB './cks node cks-worker -- grep "it'"'"'s" /etc/a ; ./cks kubectl delete po x ; echo "'"'"'"'
 GA './cks kubectl get po -o jsonpath='"'"'{.items[*].metadata.name}'"'"''
 GA './cks kubectl get pods -A | grep -E "Crash|Error" | wc -l'
+# F12: read-only RBAC questions are allowed, but only directly after kubectl
+GA './cks kubectl auth can-i delete configmaps -n t01-ledger --as system:serviceaccount:t01-ledger:report-reader'
+GA './cks kubectl auth whoami'
+GB './cks kubectl delete pod x auth can-i'
+GB './cks kubectl auth reconcile -f rbac.yaml'
 
 printf 'guards: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

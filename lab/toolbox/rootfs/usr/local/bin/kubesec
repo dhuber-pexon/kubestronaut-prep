@@ -1,0 +1,9 @@
+#!/bin/sh
+# kubesec, offline by default: `kubesec scan` validates against the JSON schemas bundled in this
+# image (/usr/share/kubesec/schemas) instead of downloading them from GitHub on every scan.
+# Your manifests are never uploaded anywhere (the public kubesec.io API is not used).
+if [ "${1:-}" = scan ]; then
+  shift
+  exec /usr/local/lib/kubesec/kubesec scan --schema-location /usr/share/kubesec/schemas "$@"
+fi
+exec /usr/local/lib/kubesec/kubesec "$@"

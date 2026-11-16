@@ -96,6 +96,19 @@ with_timeout() {
   return "$rc"
 }
 
+# Runs "$@" in a new session without a controlling terminal and waits for it (exit code passed on).
+# Used to start the VM: otherwise its processes (krunkit, gvproxy) stay tied to the terminal and
+# closing the tab kills the VM before the teardown can delete the cluster cleanly.
+in_new_session() {
+  if [ -x /usr/bin/perl ]; then
+    /usr/bin/perl -MPOSIX -e 'my $p = fork(); die "fork: $!\n" unless defined $p;
+      if ($p == 0) { POSIX::setsid(); exec @ARGV or die "exec: $!\n"; }
+      waitpid($p, 0); exit($? >> 8);' -- "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
+
 machine_state() {   # missing | running | stopped | starting | …
   local s
   s="$("$PODMAN" machine inspect "$MACHINE" --format '{{.State}}' 2>/dev/null)" || { echo missing; return 0; }
@@ -148,7 +161,7 @@ ensure_machine() {
   if [ "$st" != running ] && [ "$st" != starting ]; then
     say "Starting the Podman VM '$MACHINE'…"
     # shellcheck disable=SC2046
-    if ! pm start "$MACHINE" $(upd_conn_flag start) >>"$LOGS/machine.log" 2>&1; then
+    if ! in_new_session "$PODMAN" machine start "$MACHINE" $(upd_conn_flag start) >>"$LOGS/machine.log" 2>&1; then
       tail -n 20 "$LOGS/machine.log" >&2
       die "podman machine start failed (log: .cks/logs/machine.log). Another Podman VM running? Check: podman machine list"
     fi
@@ -216,7 +229,8 @@ toolbox_running() { [ "$(p inspect -f '{{.State.Running}}' "$TOOLBOX" 2>/dev/nul
 ensure_toolbox() {
   if p container exists "$TOOLBOX" 2>/dev/null; then
     local img; img="$(p inspect -f '{{.ImageName}}' "$TOOLBOX" 2>/dev/null || true)"
-    if [ "$img" != "$TOOLBOX_IMAGE" ] && ! owner_alive; then
+    # An outdated toolbox is replaced, unless another ./cks terminal is using it right now.
+    if [ "$img" != "$TOOLBOX_IMAGE" ] && ! other_owner_alive; then
       p rm -f -t 1 "$TOOLBOX" >/dev/null 2>&1 || true
     else
       if [ "$img" != "$TOOLBOX_IMAGE" ]; then warn "The toolbox image changed; it is picked up on the next fresh start."; fi
@@ -330,7 +344,7 @@ reseed_active() {
   local s; s="$(active_session)"
   if [ -z "$s" ]; then return 0; fi
   if [ ! -d "$ROOT/$s/tasks" ]; then rm -f "$STATE/active-session"; return 0; fi
-  say "Seeding the active session $s…"
+  say "Seeding the active session ${s}…"   # braces: bash 3.2 would read the "…" bytes as part of the name
   seed_session "$ROOT/$s"
 }
 
@@ -465,6 +479,9 @@ owner_alive() {
   local pid start
   pid="$(sed -n 1p "$RUN/owner")"; start="$(sed -n 2p "$RUN/owner")"
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ "$(proc_start "$pid")" = "$start" ]
+}
+other_owner_alive() {   # a DIFFERENT ./cks terminal owns the lab (not this process)
+  owner_alive && [ "$(sed -n 1p "$RUN/owner")" != "$$" ]
 }
 claim_owner()   { { echo $$; proc_start $$; } > "$RUN/owner"; }
 release_owner() {

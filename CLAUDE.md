@@ -57,8 +57,11 @@ There is **no** kubectl, kind, helm, trivy or docker on the Mac, and none may be
   `lab/toolbox/Dockerfile` (pinned, checksum-verified).
 - **Never send repo, session or progress content to an external service:** no gists, pastebins, uploads, or online scanners
   (e.g. the public kubesec.io API). MCP connectors and Artifacts are disabled in project settings.
-- cosign: only local key pairs (`cosign generate-key-pair`). Never keyless/OIDC signing, never a public transparency log:
-  sign with `--use-signing-config=false --tlog-upload=false` and verify with `--insecure-ignore-tlog=true` (check `cosign sign-blob --help` for the pinned version).
+- cosign: only local key pairs (`cosign generate-key-pair`). Never keyless/OIDC signing, never a public transparency log.
+  The toolbox's `cosign` wrapper adds `--signing-config /etc/cosign/offline-signing-config.json` (no tlog, no TSA, no CA) to every
+  sign/attest command, so `cosign sign-blob --key cosign.key --bundle b.json f` stays offline. Verify with
+  `cosign verify-blob --key cosign.pub --bundle b.json --insecure-ignore-tlog=true f`. Never pass a different `--signing-config`.
+- kubesec: the toolbox's `kubesec` wrapper validates against bundled JSON schemas, so scans need no network. Never use the public kubesec.io API.
 - Web access (WebFetch/WebSearch) asks first. Use it only for docs the learner needs.
 
 ## Free and open source only
@@ -72,7 +75,10 @@ Only free, open-source tools and images; nothing that needs an account, a trial,
 - **Live:** NetworkPolicy · RBAC/ServiceAccounts · Pod Security Admission · securityContext/immutability · Secrets + encryption at rest
   (`etcdctl` on the control plane) · seccomp RuntimeDefault/Localhost · kube-apiserver flags (audit, admission plugins incl.
   NodeRestriction/ImagePolicyWebhook config, anonymous-auth) · kubelet config · kube-bench (on the nodes) · ValidatingAdmissionPolicy ·
-  RuntimeClass objects · trivy, kubesec, kube-linter, bom, cosign · binary checksum checks · node OS footprint · Falco (best effort).
+  RuntimeClass objects · trivy, kubesec, kube-linter, bom, cosign · binary checksum checks · node OS footprint · Falco (modern eBPF; verified).
+  All of these were verified on the real lab (2026-11-16, results in post-podman-steps.md).
+- **Node edits:** edit static-pod manifests atomically (write a copy outside `/etc/kubernetes/manifests`, then `mv` it in).
+  The kubelet reads every file in that folder, so backups or half-edited files there break kube-apiserver.
 - **File-graded:** AppArmor (no AppArmor in the VM kernel) · running gVisor · Cilium/Istio encryption · kubeadm upgrade · Ingress TLS
   (spec only, no ingress controller).
 

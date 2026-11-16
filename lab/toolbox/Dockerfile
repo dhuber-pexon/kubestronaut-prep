@@ -64,11 +64,11 @@ RUN case "${TARGETARCH}" in \
     fetch "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz" trivy.tgz "$TRIVY_SHA"; \
     tar -xzf trivy.tgz trivy; install -m 0755 trivy /usr/local/bin/trivy; \
     fetch "https://github.com/controlplaneio/kubesec/releases/download/${KUBESEC_VERSION}/kubesec_linux_${TARGETARCH}.tar.gz" kubesec.tgz "$KUBESEC_SHA"; \
-    tar -xzf kubesec.tgz kubesec; install -m 0755 kubesec /usr/local/bin/kubesec; \
+    tar -xzf kubesec.tgz kubesec; install -D -m 0755 kubesec /usr/local/lib/kubesec/kubesec; \
     fetch "https://github.com/stackrox/kube-linter/releases/download/${KUBELINTER_VERSION}/${KUBELINTER_FILE}" kube-linter.tgz "$KUBELINTER_SHA"; \
     tar -xzf kube-linter.tgz kube-linter; install -m 0755 kube-linter /usr/local/bin/kube-linter; \
     fetch "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-${TARGETARCH}" cosign "$COSIGN_SHA"; \
-    install -m 0755 cosign /usr/local/bin/cosign; \
+    install -D -m 0755 cosign /usr/local/lib/cosign/cosign; \
     fetch "https://github.com/kubernetes-sigs/bom/releases/download/${BOM_VERSION}/bom-${TARGETARCH}-linux" bom "$BOM_SHA"; \
     install -m 0755 bom /usr/local/bin/bom; \
     # podman-remote: the version follows the VM, so it is checked against the release's own shasums file.
@@ -83,6 +83,25 @@ RUN case "${TARGETARCH}" in \
     helm completion bash > /usr/share/bash-completion/completions/helm; \
     kind completion bash > /usr/share/bash-completion/completions/kind
 
+# kubesec validates manifests against JSON schemas, which it otherwise downloads from GitHub on every
+# scan. Bundling them (pinned commit, sha256-verified) keeps `kubesec scan` fully offline; the
+# kubesec wrapper in rootfs/ points it here. Workload kinds only, the kinds kubesec scores.
+ARG K8S_SCHEMA_COMMIT=6ea44f54bb5cdedb2f61fba42c9b342e97959262
+RUN D=/usr/share/kubesec/schemas/master-standalone-strict; mkdir -p "$D"; cd "$D"; \
+    for entry in \
+      d1c50c4c3413216f3b47fcbb5276c408bb240eef9beec4791cc3975cb556b3e0:pod-v1.json \
+      e1af13a70959c4e3ccddc70c33065bc06bcb40fcfec1bcf43fb8d077f361fc3f:deployment-apps-v1.json \
+      0bdcca2862224ef7b6ccb10430afa7e068107f3a9ec0d4b83116e1c85f44a533:daemonset-apps-v1.json \
+      e78d3f791dcb08ce2e48e86ba7aac1ca2b53dbd77fd789657f908441fec1f881:statefulset-apps-v1.json \
+      924bf8cb0e94f304f7ae98d75aa65ed34eabe503a67f3376944881df3c6f4d3d:replicaset-apps-v1.json \
+      5b612cad35276b7f6fa3934f536b5b37f4ca5dddf36ccabe1ef26d03fb00efd2:job-batch-v1.json \
+      b6eb0df44b830af25f978afb47a34bb644e6dff8c16109809cf7aff99b175624:cronjob-batch-v1.json; \
+    do \
+      sha="${entry%%:*}"; file="${entry#*:}"; \
+      curl -fsSL --retry 3 -o "$file" "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/${K8S_SCHEMA_COMMIT}/master-standalone-strict/$file"; \
+      echo "$sha  $file" | sha256sum -c -; \
+    done
+
 # Non-interactive `podman exec` calls (Claude, ./cks kubectl) need no bashrc.
 ENV KUBECONFIG=/root/.kube/config \
     KIND_EXPERIMENTAL_PROVIDER=podman \
@@ -94,7 +113,7 @@ ENV KUBECONFIG=/root/.kube/config \
     LANG=C.UTF-8
 
 COPY rootfs/ /
-RUN chmod 0755 /usr/local/bin/ssh /usr/local/bin/sudo /usr/local/bin/cks-teardown /usr/local/bin/cks-lab-nodes
+RUN chmod 0755 /usr/local/bin/ssh /usr/local/bin/sudo /usr/local/bin/cks-teardown /usr/local/bin/cks-lab-nodes /usr/local/bin/kubesec /usr/local/bin/cosign
 
 WORKDIR /root
 CMD ["sleep", "infinity"]
