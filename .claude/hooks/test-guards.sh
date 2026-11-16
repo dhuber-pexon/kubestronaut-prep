@@ -73,6 +73,13 @@ A 'grep -rn sudo lab/'
 A 'mkdir -p sessions/20261116-1200-drill/tasks/01-x/work'
 A 'bash -n cks'
 A 'chmod +x sessions/s/tasks/01-a/.meta/seed.sh'
+# quote-aware splitting (finding F2): separators inside quotes run inside a container, not on the Mac
+A "podman --connection cks-root exec cks-toolbox sh -c 'command -v trivy && trivy --version'"
+A './cks node cks-worker -- sh -c "crictl ps; kubectl version"'
+B 'cd sessions && kubectl get po'
+B 'podman run -p "8080:80" nginx'
+B "podman run -d -p '0.0.0.0:9000:80' nginx"
+B 'true; trivy image nginx'
 
 # --- grader-guard.sh ---
 GA './cks kubectl get networkpolicy -n team-a -o yaml'

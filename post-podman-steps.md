@@ -27,7 +27,9 @@ Commands marked **(exam shell)** run inside `./cks`. Commands marked **(Mac)** r
 ### A0 Preflight (Mac)
 
 - [ ] `podman --version` prints a stable release (no `-rc` / `-dev`).
-- [ ] `podman machine list` shows no other VM running. Stop it if there is one; only one VM can run at a time.
+- [ ] `podman machine list` is empty. If the installer's last step made you run `podman machine init`, remove that VM
+  (`podman-machine-default` shares all of `/Users`): `podman machine rm podman-machine-default`.
+- [ ] Remove the installer's helper service, which the lab doesn't need: `sudo /opt/podman/bin/podman-mac-helper uninstall`.
 - [ ] Record the baseline: `ls -la ~/.kube ~/.docker 2>&1`. Both should be absent or unchanged by the end of Part A.
 - [ ] `./cks status` reports `VM 'cks': missing`.
 
@@ -37,7 +39,7 @@ Commands marked **(exam shell)** run inside `./cks`. Commands marked **(Mac)** r
   - VM init
   - image builds (toolbox and node build in parallel)
   - cluster creation
-- [ ] macOS asks for Documents access for the VM helper (krunkit or vfkit). Click **Allow**.
+- [ ] If macOS asks for Documents access for the VM helper (krunkit or vfkit), click **Allow**. From the VS Code terminal there is usually no prompt.
 - [ ] Podman does **not** ask to change the default connection (`--update-connection=false` works).
 - [ ] You land in the exam shell (`cks:…$`) and see the banner.
 - [ ] **(exam shell)** `k get nodes -o wide`: `cks-control-plane` and `cks-worker` are Ready on **v1.37.x**.
@@ -61,10 +63,9 @@ Full logs are in `.cks/logs/` (machine, build-toolbox, build-node, cluster, seed
 
 ### A2 Local-only and privacy proof (Mac)
 
-- [ ] `./cks verify-local` prints only ✔ lines:
-  - no `local-only:` findings
-  - **no** "could not list the folders shared with the VM" warning
-- [ ] `podman machine inspect cks`: under `Mounts`, only this project folder (and, on Podman 6, `~/.config/containers`).
+- [ ] `./cks verify-local` prints only ✔ lines, including "the VM shares only this project folder with the Mac".
+- [ ] Cross-check by hand (Mac): `podman machine ssh cks findmnt -t virtiofs` lists only this project folder.
+  (Podman 6.2's `machine inspect` no longer lists mounts.)
 - [ ] `netstat -an -p tcp | grep LISTEN`: the lab's API port appears **only** as `127.0.0.1.<port>`.
 - [ ] `lsof -nP -iTCP -sTCP:LISTEN -c gvproxy -c krunkit -c vfkit`: every address is `127.0.0.1` or `[::1]`.
 - [ ] `ls -la ~/.kube ~/.docker 2>&1` is unchanged against A0.
@@ -75,7 +76,7 @@ Full logs are in `.cks/logs/` (machine, build-toolbox, build-node, cluster, seed
      ```
   2. `./cks verify-local` must report a finding and exit non-zero.
   3. Revert the file.
-  - **Known gap to fix in A6:** `cmd_up` runs the static check only *after* `create_cluster`. Move the static part of `audit_local` before cluster creation, so a bad `kind.yaml` never gets created.
+  - Also: `./cks up` with the bad file must refuse **before** starting anything (`audit_static` runs first since fix F3).
 - [ ] **Negative test 2 (runtime).**
   1. **Create** (do not start) a container with a wildcard binding:
      ```bash
@@ -173,7 +174,6 @@ AppArmor, running gVisor, Cilium/Istio encryption, kubeadm upgrade and Ingress T
 ### A6 Close out bring-up
 
 - [ ] Fix every finding from A1–A5.
-- [ ] Move the static `kind.yaml` check before cluster creation (A2 known gap).
 - [ ] Update the live-vs-file matrix ([README.md](README.md), [CLAUDE.md](CLAUDE.md)) and the cosign flags.
 - [ ] Update [quick-start.md](quick-start.md) with real timings, the real macOS prompt wording, and the VS Code window-close answer.
 - [ ] `bash .claude/hooks/test-guards.sh` and `/bin/bash -n cks` are green.
@@ -318,10 +318,23 @@ AppArmor needs no spike: the Podman VM kernel has no AppArmor LSM, so it stays f
 
 | Date | Step | Result | Notes / fix commit |
 |---|---|---|---|
-| | A0 | | |
-| | A1 | | VM init … s · builds … s · cluster … s |
-| | A2 | | |
-| | A3 | | VS Code window close fires SessionEnd: yes / no |
+| 2026-11-16 | A0 | pass | Podman 6.2.0, provider libkrun. The installer's `podman machine init` created `podman-machine-default` (shares all of `/Users`, `/private`, `/var/folders`); removed before the run. Baseline: `~/.kube/config` dated 2 Feb 2026, 5638 bytes; `~/.docker` absent |
+| 2026-11-16 | A1 (simple run) | pass | `./cks` from the VS Code terminal: VM + both images ≈ 1–2 min, cluster ≈ 2 min, **about 4 min in total** to the exam shell. 2 nodes Ready on v1.37.0, containerd 2.3.4, Fedora kernel 7.2. **No macOS Documents prompt appeared** (the VS Code terminal already has access). trivy 0.76.2 in the exam shell (not on nodes, as intended) |
+| 2026-11-16 | A2 (partial) | pass, 1 finding | **Shares (checked inside the VM with findmnt):** only the project folder; the VM sees 1 entry in Documents vs 58 on the Mac; nodes have no `/Users`. **Ports:** only the API is published, on `127.0.0.1:32897`. **Mac:** no non-loopback TCP listener at all; gvproxy/krunkit listen on loopback only. **Images:** docker.io pull via `mirror.gcr.io` works (test pod Running in 4 s). **After purge:** `~/.kube/config` and `~/.docker` unchanged. **Finding F1** below |
+| 2026-11-16 | A3 (partial) | pass | `exit` → Enter: cluster and toolbox deleted, VM stopped about 20 s later, no lock/owner files left. `./cks purge`: no VMs, connections, VM processes or `.cks/` remain. Other lifecycle cases not run yet |
+| 2026-11-16 | Re-run after fixes | pass | `podman-mac-helper` removed (no launch daemon or process; stale socket file in `/var/run` has no listener and is cleared on reboot). Images rebuilt automatically; nodes Ready on v1.37.0 about 75 s after cluster start. **Documents boundary, checked without reading anything above `…/GitHub/Personal`:** krunkit is configured to share exactly one folder (the project); VM processes hold no open files in Documents outside the project; the VM, the exam-shell container and the mount tables show only the project folder; the VM's `…/Personal` is the VM's own disk (`/`, xfs), not the Mac folder; nodes have no Mac folders; no symlinks in the project. `verify-local`: ✔ API on 127.0.0.1 only, ✔ VM shares only the project folder (**F1 verified**). Typing `trivy` on a node shows the exam-shell hint (**F6 verified**). Teardown: cluster and toolbox deleted, VM stopped |
+| | A3 (rest) | | VS Code window close fires SessionEnd: yes / no |
 | | A4 | | Falco: live / fallback · cosign flags: … |
 | | A5 | | telemetry opt-out honoured from project settings: yes / no |
 | | A6 | | |
+
+### Findings from the first test run (2026-11-16)
+
+| # | Finding | Impact | Fix (✅ = done and verified) |
+|---|---|---|---|
+| F1 ✅ | `podman machine inspect` (6.2) has no `Mounts` field, so `verify-local` only warns "could not list the folders shared with the VM", and `./cks status` prints `?` | the shared-folder check is not enforced | read the real shares from inside the VM: `podman machine ssh cks findmnt -rn -t virtiofs -o TARGET` (verified: returns exactly the project folder); fail closed when it can't be read |
+| F2 ✅ | `guard.sh` splits commands on `;`, `&&` and `\|` even inside quotes, so a quoted `sh -c '… && trivy …'` was blocked as a Mac command | false positives for Claude | reuse the quote-aware neutraliser from `grader-guard.sh` before splitting; add test cases |
+| F3 ✅ | The static `lab/kind.yaml` check runs only after the cluster is created (known gap) | a bad config would exist briefly | run the static audit first in `cmd_up` |
+| F4 ✅ | No macOS Documents prompt when started from the VS Code terminal | quick-start says to expect one | reword: "macOS *may* ask…" |
+| F5 ✅ | The Podman `.pkg` installer also installed **podman-mac-helper** as a root launch daemon (`/Library/LaunchDaemons/com.github.containers.podman.helper-<user>.plist`, socket `/var/run/podman-helper-<user>.socket`) plus `/etc/paths.d/podman-pkg`. VM start then printed "Another process was listening on the default Docker API socket address" | local Unix socket only, no network exposure; but it is a system-level component the lab doesn't need | quick-start: say the installer adds it and how to remove it (`sudo /opt/podman/bin/podman-mac-helper uninstall`); include it in the uninstall section |
+| F6 ✅ | `trivy` typed inside `ssh cks-control-plane` gave "command not found" | user confusion | show a one-line note when entering a node shell ("you're on node …; tools like trivy are in the exam shell; `exit` to return") |

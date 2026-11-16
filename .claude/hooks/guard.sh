@@ -82,7 +82,25 @@ if has "${W}podman[[:space:]]+(machine[[:space:]]+(rm|reset|init|set|os)|system[
 fi
 
 # --- per-command checks (split on ; & |) ----------------------------------------------------
-segments="$(printf '%s' "$flat" | tr ';&|' '\n\n\n')"
+# Quote-aware split: separators inside quotes (e.g. sh -c 'a && b' run inside a container) are not
+# command boundaries on the Mac. Quote characters are dropped, quoted ; & | become "_".
+nz="$(printf '%s' "$flat" | awk -v q="'" '{
+  s = $0; out = ""; st = 0
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (st == 0) {
+      if (c == q) { st = 1; continue }
+      if (c == "\"") { st = 2; continue }
+      out = out c
+    } else if ((st == 1 && c == q) || (st == 2 && c == "\"")) {
+      st = 0
+    } else {
+      out = out ((c ~ /[|;&]/) ? "_" : c)
+    }
+  }
+  print out
+}')"
+segments="$(printf '%s' "$nz" | tr ';&|' '\n\n\n')"
 while IFS= read -r seg; do
   [ -n "$seg" ] || continue
   # strip leading env assignments / `env`

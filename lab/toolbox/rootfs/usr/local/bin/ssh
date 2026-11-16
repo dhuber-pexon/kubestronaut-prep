@@ -28,4 +28,5 @@ if [ $# -gt 0 ]; then
   if [ -t 0 ] && [ -t 1 ]; then exec podman exec -it "$host" bash -lc "$*"; fi
   exec podman exec -i "$host" bash -lc "$*"
 fi
+echo "→ node $host (exam-style ssh). Lab tools like trivy and kubesec are in the exam shell, not here. Type exit to return." >&2
 exec podman exec -it "$host" bash -l

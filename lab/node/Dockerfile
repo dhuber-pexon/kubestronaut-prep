@@ -7,6 +7,7 @@
 #   - etcdctl, etcdutl      for checking encryption at rest
 #   - kube-bench + cfg      for CIS benchmark tasks (kube-bench run --targets master)
 #   - a sudo shim           nodes run as root; `sudo -i` keeps working
+#   - a node prompt + hint  typing a lab tool (trivy, …) on a node points back to the exam shell
 #   - a docker.io mirror    pulls go through mirror.gcr.io first, then docker.io, so Docker Hub's
 #                           anonymous rate limit never forces a login. The lab is rebuilt every time.
 # Everything is open source and pinned/checksum-verified.
@@ -59,4 +60,5 @@ RUN mkdir -p /etc/containerd/certs.d/docker.io \
  && grep -q 'config_path = "/etc/containerd/certs.d"' /etc/containerd/config.toml
 
 COPY rootfs/ /
-RUN chmod 0755 /usr/local/bin/sudo
+RUN chmod 0755 /usr/local/bin/sudo \
+ && chmod 0644 /etc/profile.d/cks-node.sh

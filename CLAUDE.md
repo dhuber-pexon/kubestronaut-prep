@@ -31,7 +31,7 @@ There is **no** kubectl, kind, helm, trivy or docker on the Mac, and none may be
 | Seed a session | `./cks seed sessions/<id>` (never starts the lab; seeds when it runs) |
 | Falco | `./cks addon falco` |
 | Fresh cluster | `./cks reset [sessions/<id>]` (asks first) |
-| Exposure proof | `./cks verify-local` |
+| Exposure proof | `./cks verify-local` (ports, VM shares, Mac listeners) |
 
 - **Don't start the lab on your own.** The learner starts it with `./cks`. Use `./cks up` only when the learner asks you to.
 - Long `./cks` commands (`up`, `reset`, `addon`) can take minutes: run them in the background.

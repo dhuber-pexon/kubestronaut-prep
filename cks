@@ -337,15 +337,29 @@ reseed_active() {
 # --------------------------------------------------------------------------------------------
 # Local-only audit (fail closed)
 # --------------------------------------------------------------------------------------------
-audit_local() {
-  local bad=0 c json pairs pair hostip port mode puball addrs a published=""
-  local cfg; cfg="$(grep -v '^[[:space:]]*#' "$ROOT/lab/kind.yaml" || true)"
+# Static part: lab/kind.yaml must keep the API on loopback and map no ports or host folders.
+# Runs before anything is started, so a bad config is never created.
+audit_static() {
+  local bad=0 cfg
+  cfg="$(grep -v '^[[:space:]]*#' "$ROOT/lab/kind.yaml" || true)"
   if ! printf '%s\n' "$cfg" | grep -Eq '^[[:space:]]*apiServerAddress:[[:space:]]*"?127\.0\.0\.1"?[[:space:]]*$'; then
     finding "lab/kind.yaml: networking.apiServerAddress must be \"127.0.0.1\""; bad=1
   fi
   if printf '%s\n' "$cfg" | grep -Eq 'extraPortMappings|extraMounts|listenAddress|hostPort'; then
     finding "lab/kind.yaml: port mappings and host mounts are not allowed"; bad=1
   fi
+  return "$bad"
+}
+
+# Folders of the Mac that are actually mounted into the VM, read from inside the VM.
+# (Podman 6.2's `machine inspect` no longer reports mounts.)
+vm_shares() {
+  with_timeout 30 "$PODMAN" machine ssh "$MACHINE" findmnt -rn -t virtiofs -o TARGET 2>/dev/null
+}
+
+audit_local() {
+  local bad=0 c json pairs pair hostip port mode puball addrs a published=""
+  audit_static || bad=1
   if [ -z "$PODMAN" ] || [ "$(machine_state)" != running ]; then
     if [ "$bad" = 0 ]; then ok "local-only: static config OK (VM not running)"; fi
     return "$bad"
@@ -383,16 +397,16 @@ audit_local() {
   done <<EOF
 $rows
 EOF
-  # The VM may share only this project folder (Podman 6 also shares its own config folder).
-  local m mounts
-  mounts="$(pm inspect "$MACHINE" --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' 2>/dev/null || true)"
+  # The VM may share exactly one folder of the Mac: this project. Checked inside the VM; fail closed.
+  local m mounts=""
+  mounts="$(vm_shares || true)"
   if [ -z "$mounts" ]; then
-    warn "local-only: could not list the folders shared with the VM (check: podman machine inspect $MACHINE)"
+    finding "could not list the folders the VM shares with the Mac"; bad=1
   fi
   while IFS= read -r m; do
     case "$m" in
-      ""|"$ROOT"|*/.config/containers|*/containers) ;;
-      *) finding "the VM shares '$m' (only $ROOT is allowed); run ./cks purge, then ./cks"; bad=1 ;;
+      ""|"$ROOT") ;;
+      *) finding "the VM shares '$m' (only this project folder is allowed); run ./cks purge, then ./cks"; bad=1 ;;
     esac
   done <<EOF
 $mounts
@@ -419,6 +433,7 @@ EOF
   done
   if [ "$bad" = 0 ]; then
     ok "local-only: only the API is published, on 127.0.0.1 (port${published:- none}); nothing else in the VM publishes a port"
+    ok "local-only: the VM shares only this project folder with the Mac"
   fi
   return "$bad"
 }
@@ -505,6 +520,7 @@ detach() {
 # --------------------------------------------------------------------------------------------
 cmd_up() {   # $1 = shell (called by the owner terminal) | detached
   local mode="${1:-detached}"
+  audit_static || die "lab/kind.yaml breaks the local-only rules; nothing was started."
   need_podman
   lock
   ensure_machine
@@ -611,8 +627,8 @@ cmd_status() {
     return 0
   fi
   say "${B}VM${N}            $MACHINE: $st"
-  if [ "$st" != missing ]; then
-    say "${B}Shared folder${N} $(pm inspect "$MACHINE" --format '{{range .Mounts}}{{.Source}} {{end}}' 2>/dev/null || echo '?')"
+  if [ "$st" = running ]; then
+    say "${B}Shared folder${N} $(vm_shares | tr '\n' ' ' || true)"
   fi
   say "${B}Owner shell${N}   $owner"
   say "${B}Active${N}        ${sess:-none}"
@@ -659,7 +675,12 @@ cmd_node() {
   if [ "${1:-}" = "--" ]; then shift; fi
   local flags="-i"
   if [ -t 0 ] && [ -t 1 ]; then flags="-it"; fi
-  if [ $# -eq 0 ]; then p exec "$flags" "$node" bash -l; else p exec "$flags" "$node" "$@"; fi
+  if [ $# -eq 0 ]; then
+    say "→ node $node. Lab tools (trivy, kubesec, …) are not on the nodes. Type exit to return."
+    p exec "$flags" "$node" bash -l
+  else
+    p exec "$flags" "$node" "$@"
+  fi
 }
 
 SEED_TARGET=""
