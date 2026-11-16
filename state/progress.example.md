@@ -1,30 +1,34 @@
-# Progress (example template)
+# CKS progress (example template)
 
-Copy to `progress.md` (gitignored) or let `/review` create/update it.
+`/grade` copies this to `progress.md` (gitignored) and keeps it up to date.
+`/create-tasks` and `/exam-session` read it to bias the next tasks.
 
-Tracks weak domains and recent scores so `/create-tasks` and `/exam-session` can bias the next drill.
+## Domains
 
-## Focus
-
-- Primary: CKA, CKS
-- Refresh: CKAD
-- Associates: KCNA, KCSA (as needed)
+| Domain | Weight | Attempts | Passed | Last result |
+|---|---|---|---|---|
+| Cluster Setup | 15 % | 0 | 0 | — |
+| Cluster Hardening | 15 % | 0 | 0 | — |
+| System Hardening | 10 % | 0 | 0 | — |
+| Minimize Microservice Vulnerabilities | 20 % | 0 | 0 | — |
+| Supply Chain Security | 20 % | 0 | 0 | — |
+| Monitoring, Logging and Runtime Security | 20 % | 0 | 0 | — |
 
 ## Weak domains
 
-_None yet — complete a review to populate._
+_None yet; complete a `/grade` to fill this in._
 
 ## Recent sessions
 
-| Date | Session | Exam mix | Score | Notes |
-|------|---------|----------|-------|-------|
-| — | — | — | — | — |
+| Date | Session | Type | Score | Notes |
+|---|---|---|---|---|
+| — | — | drill / exam | — | — |
 
 ## Avoid repeats
 
-_Task slugs / themes already practiced (agent: prefer fresh scenarios)._
+_Task themes already practised (prefer fresh scenarios)._
 
 ## Notes for next generate
 
-- Bias toward weak domains after the first reviews.
-- Mix flavors: greenfield, repair, diagnose, harden, speed.
+- Bias toward weak domains after the first grades.
+- Mix flavors: greenfield, repair, diagnose, harden, investigate, speed.

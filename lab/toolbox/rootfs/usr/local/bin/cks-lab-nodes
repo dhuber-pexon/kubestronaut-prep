@@ -1,0 +1,3 @@
+#!/bin/bash
+# Prints the node containers of the lab cluster, one per line.
+podman ps --filter "label=io.x-k8s.kind.cluster=${CKS_CLUSTER:-cks}" --format '{{.Names}}' | sort

@@ -1,0 +1,776 @@
+#!/bin/bash
+# cks - the one entry point of the local CKS practice lab.
+#
+#   ./cks          start the lab (if needed) and open the exam shell. Leaving it destroys the lab.
+#   ./cks help     all commands
+#
+# Only dependency on the Mac: Podman (Apache-2.0). kind, kubectl and every CKS tool run in
+# containers inside a dedicated Podman VM named "cks" that can only see this project folder.
+# Nothing is published beyond 127.0.0.1 (./cks verify-local proves it), nothing is written
+# outside this folder except Podman's own record of the VM, and no account or login is needed.
+#
+# Written for macOS /bin/bash 3.2 and BSD userland: no GNU coreutils, no jq, no `timeout`.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd -P)"
+MACHINE="cks"                   # dedicated Podman VM
+CONN="cks-root"                 # its rootful connection; every container call is pinned to it
+CLUSTER="cks"
+CP="${CLUSTER}-control-plane"
+WORKER="${CLUSTER}-worker"
+TOOLBOX="cks-toolbox"
+REAPER="cks-reaper"
+NET="kind"
+LABEL="io.cks.lab=true"
+FALCO_CHART_VERSION="9.2.2"
+STATE="$ROOT/.cks"
+RUN="$STATE/run"
+LOGS="$STATE/logs"
+VM_CPUS="${CKS_VM_CPUS:-4}"
+VM_MEMORY_MB="${CKS_VM_MEMORY_MB:-6144}"
+VM_DISK_GB="${CKS_VM_DISK_GB:-40}"
+PODMAN_RELEASES="https://github.com/podman-container-tools/podman/releases"
+
+mkdir -p "$RUN" "$LOGS"
+
+# One exit handler for every command: release the lock and, if this process owns the
+# lab (bare ./cks), hand the lab to the background teardown.
+OWNER=0
+LOCK_HELD=0
+CLUSTER_CREATED=0
+on_exit() {
+  if [ "$LOCK_HELD" = 1 ]; then rm -rf "$RUN/lock"; LOCK_HELD=0; fi
+  if [ "$OWNER" = 1 ]; then finish_owner; fi
+}
+trap 'on_exit' EXIT
+
+if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; N=$'\033[0m'
+else B=""; G=""; Y=""; R=""; N=""; fi
+
+say()     { printf '%s\n' "$*"; }
+ok()      { printf '%s✔%s %s\n' "$G" "$N" "$*"; }
+warn()    { printf '%s!%s %s\n' "$Y" "$N" "$*" >&2; }
+die()     { printf '%s✖%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
+finding() { printf '%s✖ local-only:%s %s\n' "$R" "$N" "$*" >&2; }
+
+# --------------------------------------------------------------------------------------------
+# Engine layer (Podman). All engine-specific code lives in this section.
+# --------------------------------------------------------------------------------------------
+PODMAN=""
+
+find_podman() {
+  if [ -n "$PODMAN" ]; then return 0; fi
+  local c
+  for c in "$(command -v podman 2>/dev/null || true)" /opt/podman/bin/podman /opt/homebrew/bin/podman /usr/local/bin/podman; do
+    if [ -n "$c" ] && [ -x "$c" ]; then
+      PODMAN="$c"
+      PATH="$(dirname "$c"):$PATH"; export PATH
+      return 0
+    fi
+  done
+  return 1
+}
+
+need_podman() {
+  find_podman && return 0
+  die "Podman is not installed. Install it once with the official podman-installer-macos-arm64.pkg from
+  $PODMAN_RELEASES
+  then run ./cks again (details: quick-start.md)."
+}
+
+pm() { "$PODMAN" machine "$@"; }                  # manages the VM (runs on the Mac)
+p()  { "$PODMAN" --connection "$CONN" "$@"; }     # talks to the engine inside the cks VM only
+
+# Runs a command with a time limit (macOS has no `timeout`). Pass a binary, not a function.
+with_timeout() {
+  local secs="$1"; shift
+  "$@" &
+  local pid=$!
+  ( sleep "$secs"; kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+  local dog=$!
+  local rc=0
+  wait "$pid" || rc=$?
+  kill "$dog" 2>/dev/null || true
+  wait "$dog" 2>/dev/null || true
+  return "$rc"
+}
+
+machine_state() {   # missing | running | stopped | starting | …
+  local s
+  s="$("$PODMAN" machine inspect "$MACHINE" --format '{{.State}}' 2>/dev/null)" || { echo missing; return 0; }
+  printf '%s\n' "${s:-unknown}"
+}
+
+# Never let Podman ask (or change) which connection is the default.
+upd_conn_flag() {
+  if pm "$1" --help 2>/dev/null | grep -q -- '--update-connection'; then printf '%s' '--update-connection=false'; fi
+}
+
+engine_up() { with_timeout 10 "$PODMAN" --connection "$CONN" info >/dev/null 2>&1; }
+
+wait_engine() {
+  local i=0
+  while [ "$i" -lt 60 ]; do
+    if engine_up; then return 0; fi
+    i=$((i + 1)); sleep 2
+  done
+  die "The Podman VM is running but its engine does not answer (log: .cks/logs/machine.log)."
+}
+
+check_folder_access() {
+  local recorded=""
+  if [ -f "$STATE/machine-root" ]; then recorded="$(cat "$STATE/machine-root")"; fi
+  if [ -n "$recorded" ] && [ "$recorded" != "$ROOT" ]; then
+    die "The VM '$MACHINE' was created for $recorded, but this folder is $ROOT.
+  Run ./cks purge once, then ./cks (the VM may only see the project folder)."
+  fi
+  if ! with_timeout 30 "$PODMAN" machine ssh "$MACHINE" test -r "$ROOT/cks" >/dev/null 2>&1; then
+    die "The VM cannot read this project folder.
+  When macOS asks whether Podman's VM helper (krunkit / vfkit) may access your Documents folder, click Allow.
+  Missed it? System Settings > Privacy & Security > Files and Folders, allow it there, then run ./cks again."
+  fi
+}
+
+ensure_machine() {
+  local st; st="$(machine_state)"
+  if [ "$st" = missing ]; then
+    say "Creating the Podman VM '$MACHINE' (one time; downloads ~1 GB; it only sees this folder)…"
+    # shellcheck disable=SC2046
+    if ! pm init "$MACHINE" --rootful --cpus "$VM_CPUS" --memory "$VM_MEMORY_MB" --disk-size "$VM_DISK_GB" \
+         --volume "$ROOT:$ROOT" $(upd_conn_flag init) >>"$LOGS/machine.log" 2>&1; then
+      tail -n 20 "$LOGS/machine.log" >&2
+      die "podman machine init failed (log: .cks/logs/machine.log)."
+    fi
+    printf '%s\n' "$ROOT" > "$STATE/machine-root"
+    st="$(machine_state)"
+  fi
+  if [ "$st" != running ] && [ "$st" != starting ]; then
+    say "Starting the Podman VM '$MACHINE'…"
+    # shellcheck disable=SC2046
+    if ! pm start "$MACHINE" $(upd_conn_flag start) >>"$LOGS/machine.log" 2>&1; then
+      tail -n 20 "$LOGS/machine.log" >&2
+      die "podman machine start failed (log: .cks/logs/machine.log). Another Podman VM running? Check: podman machine list"
+    fi
+  fi
+  wait_engine
+  check_folder_access
+}
+
+stop_machine() {
+  if [ "$(machine_state)" = running ]; then
+    say "Stopping the Podman VM '$MACHINE'…"
+    pm stop "$MACHINE" >>"$LOGS/machine.log" 2>&1 || warn "could not stop the VM (log: .cks/logs/machine.log)"
+  fi
+}
+
+# --------------------------------------------------------------------------------------------
+# Images, network, toolbox
+# --------------------------------------------------------------------------------------------
+hash_dir() {
+  (cd "$1" && find . -type f ! -name '.DS_Store' | LC_ALL=C sort | xargs cksum | cksum | awk '{print $1}')
+}
+
+image_tags() {
+  local v
+  v="$(p version --format '{{.Server.Version}}' 2>/dev/null || true)"
+  [ -n "$v" ] || die "Could not read the Podman version inside the VM."
+  PODMAN_SERVER_VERSION="$v"
+  TOOLBOX_IMAGE="localhost/cks-toolbox:$(hash_dir "$ROOT/lab/toolbox")-p$(printf '%s' "$v" | tr -c 'A-Za-z0-9_.-' '-')"
+  NODE_IMAGE="localhost/cks-node:$(hash_dir "$ROOT/lab/node")"
+}
+
+build_image() {   # tag context [build args…]
+  local tag="$1" ctx="$2"; shift 2
+  if p image exists "$tag" 2>/dev/null; then return 0; fi
+  say "Building ${tag#localhost/} (first time takes a few minutes; progress: .cks/logs/build.log)…"
+  if ! p build --pull=missing --label "$LABEL" -t "$tag" "$@" "$ctx" >>"$LOGS/build.log" 2>&1; then
+    tail -n 30 "$LOGS/build.log" >&2
+    die "Image build failed (log: .cks/logs/build.log)."
+  fi
+  local repo="${tag%:*}" old
+  for old in $(p images --filter "reference=$repo" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true); do
+    if [ "$old" != "$tag" ]; then p rmi "$old" >/dev/null 2>&1 || true; fi
+  done
+}
+
+ensure_images() {
+  image_tags
+  build_image "$TOOLBOX_IMAGE" "$ROOT/lab/toolbox" --build-arg "PODMAN_VERSION=$PODMAN_SERVER_VERSION"
+  build_image "$NODE_IMAGE" "$ROOT/lab/node"
+}
+
+ensure_network() {   # lives inside the VM; kind reuses it
+  if ! p network exists "$NET" >/dev/null 2>&1; then
+    p network create --label "$LABEL" "$NET" >/dev/null
+  fi
+}
+
+toolbox_running() { [ "$(p inspect -f '{{.State.Running}}' "$TOOLBOX" 2>/dev/null || true)" = true ]; }
+
+ensure_toolbox() {
+  if p container exists "$TOOLBOX" 2>/dev/null; then
+    local img; img="$(p inspect -f '{{.ImageName}}' "$TOOLBOX" 2>/dev/null || true)"
+    if [ "$img" != "$TOOLBOX_IMAGE" ] && ! owner_alive; then
+      p rm -f -t 1 "$TOOLBOX" >/dev/null 2>&1 || true
+    else
+      if [ "$img" != "$TOOLBOX_IMAGE" ]; then warn "The toolbox image changed; it is picked up on the next fresh start."; fi
+      if ! toolbox_running; then p start "$TOOLBOX" >/dev/null; fi
+      return 0
+    fi
+  fi
+  if ! p volume exists cks-trivy-cache >/dev/null 2>&1; then
+    p volume create --label "$LABEL" cks-trivy-cache >/dev/null
+  fi
+  # No published ports. Same-path mount so `./cks kubectl apply -f sessions/…` resolves.
+  p run -d --name "$TOOLBOX" --hostname "$TOOLBOX" --label "$LABEL" --init \
+    --network "$NET" --security-opt label=disable \
+    -v /run/podman/podman.sock:/run/podman/podman.sock \
+    -v "$ROOT:$ROOT" -w "$ROOT" \
+    -v cks-trivy-cache:/root/.cache/trivy \
+    -e CKS_ROOT="$ROOT" -e CKS_CLUSTER="$CLUSTER" \
+    "$TOOLBOX_IMAGE" >/dev/null
+  if cluster_exists; then export_kubeconfig; fi
+}
+
+# --------------------------------------------------------------------------------------------
+# Cluster
+# --------------------------------------------------------------------------------------------
+cluster_exists() { p container exists "$CP" >/dev/null 2>&1; }
+lab_nodes() { p ps -a --filter "label=io.x-k8s.kind.cluster=$CLUSTER" --format '{{.Names}}' 2>/dev/null | LC_ALL=C sort || true; }
+
+workdir() { case "$PWD/" in "$ROOT"/*) printf '%s' "$PWD" ;; *) printf '%s' "$ROOT" ;; esac; }
+
+tb() {   # run inside the toolbox; a TTY is attached only when we have one (Claude has none)
+  if [ -t 0 ] && [ -t 1 ]; then p exec -it -w "$(workdir)" "$TOOLBOX" "$@"
+  else p exec -i -w "$(workdir)" "$TOOLBOX" "$@"; fi
+}
+
+export_kubeconfig() {   # internal endpoint https://cks-control-plane:6443; lives only in the toolbox
+  p exec -i "$TOOLBOX" kind export kubeconfig --name "$CLUSTER" --internal --kubeconfig /root/.kube/config \
+    >/dev/null 2>&1 || warn "could not export the kubeconfig inside the toolbox"
+}
+
+creator() { cat "$RUN/cluster-creator" 2>/dev/null || true; }
+
+create_cluster() {   # $1 = shell | detached
+  say "Creating Kubernetes cluster '$CLUSTER' (v1.37, 1 control plane + 1 worker)…"
+  : > "$LOGS/cluster.log"
+  local attempt
+  for attempt in 1 2; do
+    if p exec -i "$TOOLBOX" kind create cluster --name "$CLUSTER" --config "$ROOT/lab/kind.yaml" \
+         --image "$NODE_IMAGE" --wait 5m --kubeconfig /root/.kube/kind-external.config >>"$LOGS/cluster.log" 2>&1; then
+      break
+    fi
+    if [ "$attempt" = 2 ] || ! grep -qiE 'already allocated|address already in use' "$LOGS/cluster.log"; then
+      tail -n 30 "$LOGS/cluster.log" >&2
+      die "kind could not create the cluster (log: .cks/logs/cluster.log)."
+    fi
+    warn "API port collision; retrying once…"
+    p exec -i "$TOOLBOX" kind delete cluster --name "$CLUSTER" >>"$LOGS/cluster.log" 2>&1 || true
+  done
+  printf '%s\n' "$1" > "$RUN/cluster-creator"
+  CLUSTER_CREATED=1
+  export_kubeconfig
+  local n
+  for n in $(lab_nodes); do   # a VM restart must never bring an old cluster back
+    p update --restart=no "$n" >/dev/null 2>&1 || true
+  done
+  if ! p exec -i "$TOOLBOX" kubectl wait --for=condition=Ready nodes --all --timeout=180s >>"$LOGS/cluster.log" 2>&1; then
+    warn "Not all nodes are Ready yet (check: ./cks kubectl get nodes)."
+  fi
+}
+
+delete_cluster() {
+  p exec -i "$TOOLBOX" kind delete cluster --name "$CLUSTER" >>"$LOGS/cluster.log" 2>&1 || true
+  local ids; ids="$(p ps -aq --filter "label=io.x-k8s.kind.cluster=$CLUSTER" 2>/dev/null || true)"
+  if [ -n "$ids" ]; then p rm -f -v -t 1 $ids >/dev/null 2>&1 || true; fi
+  rm -f "$RUN/cluster-creator"
+}
+
+start_stopped_nodes() {
+  local n
+  for n in $(lab_nodes); do
+    if [ "$(p inspect -f '{{.State.Running}}' "$n" 2>/dev/null || true)" != true ]; then
+      p start "$n" >/dev/null 2>&1 || warn "could not start node $n"
+    fi
+  done
+}
+
+# --------------------------------------------------------------------------------------------
+# Sessions: seeds are idempotent scripts, re-applied after every fresh cluster
+# --------------------------------------------------------------------------------------------
+active_session() { cat "$STATE/active-session" 2>/dev/null || true; }
+
+run_seed() {   # $1 = absolute task dir
+  local task="$1" rel="${1#$ROOT/}"
+  if [ ! -f "$task/.meta/seed.sh" ]; then return 0; fi
+  if p exec -i -w "$task" -e CKS_TASK_DIR="$task" "$TOOLBOX" bash "$task/.meta/seed.sh" >>"$LOGS/seed.log" 2>&1; then
+    ok "seeded $rel"
+  else
+    warn "seed failed for $rel (log: .cks/logs/seed.log)"
+    return 1
+  fi
+}
+
+seed_session() {   # $1 = absolute session dir
+  local t
+  for t in "$1"/tasks/*/; do
+    [ -d "$t" ] || continue
+    run_seed "${t%/}" || true
+  done
+}
+
+reseed_active() {
+  local s; s="$(active_session)"
+  if [ -z "$s" ]; then return 0; fi
+  if [ ! -d "$ROOT/$s/tasks" ]; then rm -f "$STATE/active-session"; return 0; fi
+  say "Seeding the active session $s…"
+  seed_session "$ROOT/$s"
+}
+
+# --------------------------------------------------------------------------------------------
+# Local-only audit (fail closed)
+# --------------------------------------------------------------------------------------------
+audit_local() {
+  local bad=0 c json pairs pair hostip port mode puball addrs a published=""
+  local cfg; cfg="$(grep -v '^[[:space:]]*#' "$ROOT/lab/kind.yaml" || true)"
+  if ! printf '%s\n' "$cfg" | grep -Eq '^[[:space:]]*apiServerAddress:[[:space:]]*"?127\.0\.0\.1"?[[:space:]]*$'; then
+    finding "lab/kind.yaml: networking.apiServerAddress must be \"127.0.0.1\""; bad=1
+  fi
+  if printf '%s\n' "$cfg" | grep -Eq 'extraPortMappings|extraMounts|listenAddress|hostPort'; then
+    finding "lab/kind.yaml: port mappings and host mounts are not allowed"; bad=1
+  fi
+  if [ -z "$PODMAN" ] || [ "$(machine_state)" != running ]; then
+    if [ "$bad" = 0 ]; then ok "local-only: static config OK (VM not running)"; fi
+    return "$bad"
+  fi
+  for c in $(lab_nodes) "$TOOLBOX" "$REAPER"; do
+    p container exists "$c" >/dev/null 2>&1 || continue
+    json="$(p inspect -f '{{json .HostConfig.PortBindings}}' "$c" 2>/dev/null || echo '{}')"
+    mode="$(p inspect -f '{{.HostConfig.NetworkMode}}' "$c" 2>/dev/null || true)"
+    puball="$(p inspect -f '{{.HostConfig.PublishAllPorts}}' "$c" 2>/dev/null || true)"
+    if [ "$mode" = host ]; then finding "$c uses host networking"; bad=1; fi
+    if [ "$puball" = true ]; then finding "$c publishes all ports (-P)"; bad=1; fi
+    pairs="$(printf '%s' "$json" | grep -oE '"HostIp":"[^"]*","HostPort":"[0-9]*"' || true)"
+    # Fail closed: every published port must have been understood by the parser above.
+    if [ "$(printf '%s' "$json" | grep -o '"HostPort"' | wc -l | tr -d ' ')" != "$(printf '%s' "$pairs" | grep -c HostPort || true)" ]; then
+      finding "$c: could not verify its port bindings ($json)"; bad=1
+    fi
+    for pair in $pairs; do
+      hostip="$(printf '%s' "$pair" | sed -E 's/^"HostIp":"([^"]*)".*/\1/')"
+      port="$(printf '%s' "$pair" | sed -E 's/.*"HostPort":"([0-9]*)"$/\1/')"
+      if [ "$c" = "$TOOLBOX" ] || [ "$c" = "$REAPER" ]; then
+        finding "$c must not publish any port (found ${hostip:-0.0.0.0}:$port)"; bad=1; continue
+      fi
+      if [ "$hostip" != 127.0.0.1 ]; then
+        finding "$c publishes port $port on '${hostip:-0.0.0.0}' (only 127.0.0.1 is allowed)"; bad=1
+      fi
+      published="$published $port"
+    done
+  done
+  # Cross-check what the Mac itself listens on for those ports.
+  for port in $published; do
+    addrs="$(netstat -an -p tcp 2>/dev/null | awk -v p=".$port" '$NF=="LISTEN" && substr($4, length($4)-length(p)+1)==p {print $4}' || true)"
+    for a in $addrs; do
+      case "$a" in
+        "127.0.0.1.$port"|"::1.$port") ;;
+        *) finding "the Mac listens on $a for the lab (must be loopback only)"; bad=1 ;;
+      esac
+    done
+  done
+  # Every socket that Podman's VM helpers (port forwarder, hypervisor) listen on must be loopback.
+  local helper
+  for helper in gvproxy krunkit vfkit; do
+    for a in $(/usr/sbin/lsof -nP -a -c "$helper" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9}' || true); do
+      case "$a" in
+        127.0.0.1:*|'[::1]':*|localhost:*) ;;
+        *) finding "$helper listens on $a (must be loopback only)"; bad=1 ;;
+      esac
+    done
+  done
+  if [ "$bad" = 0 ]; then
+    ok "local-only: API published on 127.0.0.1 only (port${published:- none}); toolbox publishes nothing"
+  fi
+  return "$bad"
+}
+
+# --------------------------------------------------------------------------------------------
+# Locking, ownership, teardown
+# --------------------------------------------------------------------------------------------
+lock() {
+  local i=0 holder
+  while ! mkdir "$RUN/lock" 2>/dev/null; do
+    holder="$(cat "$RUN/lock/pid" 2>/dev/null || true)"
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then rm -rf "$RUN/lock"; continue; fi
+    if [ -z "$holder" ] && [ "$i" -gt 30 ]; then rm -rf "$RUN/lock"; continue; fi
+    if [ "$i" = 0 ]; then say "Waiting for another ./cks operation to finish${holder:+ (pid $holder)}…"; fi
+    i=$((i + 1))
+    [ "$i" -lt 900 ] || die "Timed out waiting for the lab lock (.cks/run/lock)."
+    sleep 1
+  done
+  echo $$ > "$RUN/lock/pid"
+  LOCK_HELD=1
+}
+unlock() {
+  if [ "$LOCK_HELD" = 1 ]; then rm -rf "$RUN/lock"; LOCK_HELD=0; fi
+}
+
+proc_start() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' || true; }
+owner_alive() {
+  [ -f "$RUN/owner" ] || return 1
+  local pid start
+  pid="$(sed -n 1p "$RUN/owner")"; start="$(sed -n 2p "$RUN/owner")"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ "$(proc_start "$pid")" = "$start" ]
+}
+claim_owner()   { { echo $$; proc_start $$; } > "$RUN/owner"; }
+release_owner() {
+  if [ -f "$RUN/owner" ] && [ "$(sed -n 1p "$RUN/owner")" = "$$" ]; then rm -f "$RUN/owner"; fi
+}
+
+wait_reaper() {
+  if p container exists "$REAPER" >/dev/null 2>&1; then
+    say "Waiting for the previous teardown to finish…"
+    p wait "$REAPER" >/dev/null 2>&1 || true
+  fi
+}
+
+# The reaper is a short-lived container owned by Podman inside the VM, so the deletion completes
+# even if the terminal or Claude session that asked for it is killed half-way.
+start_reaper() {
+  if p container exists "$REAPER" >/dev/null 2>&1; then return 0; fi
+  local img
+  img="$(p images --filter "reference=localhost/cks-toolbox" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | sed -n 1p || true)"
+  if [ -z "$img" ]; then   # no toolbox image yet: remove whatever exists directly
+    local ids; ids="$(p ps -aq --filter "label=io.x-k8s.kind.cluster=$CLUSTER" 2>/dev/null || true)"
+    if [ -n "$ids" ]; then p rm -f -v -t 1 $ids >/dev/null 2>&1 || true; fi
+    p rm -f -v -t 1 "$TOOLBOX" >/dev/null 2>&1 || true
+    return 0
+  fi
+  p run -d --rm --name "$REAPER" --label "$LABEL" --security-opt label=disable \
+    -v /run/podman/podman.sock:/run/podman/podman.sock -e CKS_CLUSTER="$CLUSTER" \
+    "$img" cks-teardown >/dev/null 2>&1 || true
+}
+
+teardown_locked() {   # caller holds the lock
+  if [ "$(machine_state)" = running ] && engine_up; then
+    say "Deleting the cluster and the toolbox…"
+    start_reaper
+    p wait "$REAPER" >/dev/null 2>&1 || true
+  fi
+  rm -f "$RUN/cluster-creator"
+  stop_machine
+}
+
+# Runs "$@" fully detached from this terminal (new session), output to the teardown log.
+detach() {
+  if [ -x /usr/bin/perl ]; then
+    nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec failed: $!\n"' -- "$@" \
+      </dev/null >>"$LOGS/teardown.log" 2>&1 &
+  else
+    nohup "$@" </dev/null >>"$LOGS/teardown.log" 2>&1 &
+  fi
+}
+
+# --------------------------------------------------------------------------------------------
+# Commands
+# --------------------------------------------------------------------------------------------
+cmd_up() {   # $1 = shell (called by the owner terminal) | detached
+  local mode="${1:-detached}"
+  need_podman
+  lock
+  ensure_machine
+  wait_reaper
+  ensure_images
+  ensure_network
+  ensure_toolbox
+  if cluster_exists; then
+    start_stopped_nodes
+    if [ "$mode" = shell ]; then
+      case "$(creator)" in
+        detached|kept) ok "Taking over the running lab cluster." ;;
+        *) say "Found a leftover cluster from an earlier session; rebuilding it fresh."; delete_cluster ;;
+      esac
+    fi
+  fi
+  if ! cluster_exists; then
+    create_cluster "$mode"
+    reseed_active
+  fi
+  if ! audit_local; then
+    warn "Local-only audit failed; destroying the lab."
+    teardown_locked
+    exit 1
+  fi
+  unlock
+  ok "Lab ready: cluster '$CLUSTER' (Kubernetes v1.37) in the Podman VM '$MACHINE'."
+}
+
+exam_shell() {
+  p exec -it -e TERM="${TERM:-xterm-256color}" -w "$ROOT" "$TOOLBOX" bash -l
+}
+
+TEARDOWN_DONE=0
+finish_owner() {
+  if [ "$TEARDOWN_DONE" = 1 ]; then return 0; fi
+  TEARDOWN_DONE=1
+  set +e
+  unlock
+  release_owner
+  if [ -n "${CKS_KEEP:-}" ]; then
+    echo kept > "$RUN/cluster-creator"
+    say "CKS_KEEP is set: the lab keeps running. Destroy it later with ./cks down."
+    return 0
+  fi
+  detach "$ROOT/cks" down
+  say "Destroying the lab in the background (log: .cks/logs/teardown.log). Your sessions/ and state/ files are kept."
+}
+on_hangup() {   # terminal closed: no questions, no terminal output
+  trap '' HUP INT TERM PIPE
+  exec </dev/null >>"$LOGS/teardown.log" 2>&1
+  finish_owner
+  exit 0
+}
+
+cmd_main() {
+  if ! [ -t 0 ] || ! [ -t 1 ]; then
+    die "./cks without arguments needs an interactive terminal. Non-interactive callers use: ./cks up | status | kubectl | node | seed"
+  fi
+  need_podman
+  if owner_alive; then
+    say "${B}Another ./cks terminal owns the lab.${N} Opening an extra shell (closing it does not destroy the lab)."
+    if [ "$(machine_state)" != running ] || ! toolbox_running; then die "The lab is still starting; try again in a moment."; fi
+    exam_shell || true
+    exit 0
+  fi
+  claim_owner
+  OWNER=1
+  trap 'on_hangup' HUP TERM
+  cmd_up shell
+  echo shell > "$RUN/cluster-creator"
+  local ans
+  while :; do
+    exam_shell || true
+    if [ -n "${CKS_KEEP:-}" ]; then break; fi
+    ans=""
+    printf '\n%sExit and destroy the lab?%s [Y/n] (yes in 15 s) ' "$B" "$N"
+    read -r -t 15 ans || true
+    printf '\n'
+    case "$ans" in
+      n|N|no|NO|No) say "Back to the lab shell."; continue ;;
+    esac
+    break
+  done
+  exit 0
+}
+
+cmd_status() {
+  local brief=0
+  if [ "${1:-}" = --brief ]; then brief=1; fi
+  if ! find_podman; then
+    say "CKS lab: Podman is not installed (see quick-start.md). Lab commands: ./cks …"
+    return 0
+  fi
+  local st owner="no" cl="absent" sess
+  st="$(machine_state)"
+  if owner_alive; then owner="yes"; fi
+  sess="$(active_session)"
+  if [ "$st" = running ] && engine_up; then
+    if cluster_exists; then cl="present"; fi
+  fi
+  if [ "$brief" = 1 ]; then
+    say "CKS lab: VM '$MACHINE' ${st}; cluster ${cl}; ./cks terminal attached: ${owner}; active session: ${sess:-none}. Access the lab only via ./cks (kubectl / node / seed / status)."
+    return 0
+  fi
+  say "${B}VM${N}            $MACHINE: $st"
+  if [ "$st" != missing ]; then
+    say "${B}Shared folder${N} $(pm inspect "$MACHINE" --format '{{range .Mounts}}{{.Source}} {{end}}' 2>/dev/null || echo '?')"
+  fi
+  say "${B}Owner shell${N}   $owner"
+  say "${B}Active${N}        ${sess:-none}"
+  if [ "$st" != running ] || ! engine_up; then say "${B}Cluster${N}       not running (start: ./cks)"; return 0; fi
+  if toolbox_running; then say "${B}Toolbox${N}       running ($(p inspect -f '{{.ImageName}}' "$TOOLBOX" 2>/dev/null))"
+  else say "${B}Toolbox${N}       not running"; fi
+  if cluster_exists && toolbox_running; then
+    say "${B}Cluster${N}       $CLUSTER (created by: $(creator))"
+    p exec -i "$TOOLBOX" kubectl get nodes -o wide 2>/dev/null || warn "API not reachable (a CKS task may be restarting kube-apiserver)"
+    if p exec -i "$TOOLBOX" kubectl get ns falco >/dev/null 2>&1; then say "${B}Add-ons${N}       falco"; fi
+  else
+    say "${B}Cluster${N}       absent"
+  fi
+}
+
+require_lab() {
+  need_podman
+  if [ "$(machine_state)" != running ] || ! engine_up || ! toolbox_running; then
+    die "The lab is not running. Start it with ./cks (interactive) or ./cks up."
+  fi
+}
+
+cmd_kubectl() { require_lab; tb kubectl "$@"; }
+
+cmd_node() {
+  [ $# -ge 1 ] || die "usage: ./cks node <cks-control-plane|cks-worker> [-- command…]"
+  require_lab
+  local node="$1"; shift
+  case "$node" in
+    controlplane|control-plane|cp) node="$CP" ;;
+    worker|node01|node) node="$WORKER" ;;
+  esac
+  if ! lab_nodes | grep -qx -- "$node"; then die "'$node' is not a node of this lab: $(lab_nodes | tr '\n' ' ')"; fi
+  if [ "${1:-}" = "--" ]; then shift; fi
+  local flags="-i"
+  if [ -t 0 ] && [ -t 1 ]; then flags="-it"; fi
+  if [ $# -eq 0 ]; then p exec "$flags" "$node" bash -l; else p exec "$flags" "$node" "$@"; fi
+}
+
+SEED_TARGET=""
+record_session() {   # $1 = session or task folder; makes its session the active one
+  local target session
+  target="$(cd "$1" 2>/dev/null && pwd -P)" || die "no such folder: $1"
+  case "$target/" in "$ROOT/sessions/"*) ;; *) die "the path must be inside sessions/" ;; esac
+  if [ -d "$target/tasks" ]; then session="$target"
+  elif [ -f "$target/TASK.md" ]; then session="$(cd "$target/../.." && pwd -P)"
+  else die "not a session or task folder: $1"; fi
+  printf '%s\n' "${session#$ROOT/}" > "$STATE/active-session"
+  SEED_TARGET="$target"
+}
+
+lab_running() {
+  find_podman && [ "$(machine_state)" = running ] && engine_up && toolbox_running && cluster_exists
+}
+
+# Never starts the lab: a lab that is not running seeds the active session when it starts.
+cmd_seed() {
+  [ $# -ge 1 ] || die "usage: ./cks seed <sessions/<id>> | <sessions/<id>/tasks/<nn-slug>>"
+  record_session "$1"
+  if find_podman && [ "$(machine_state)" = running ]; then
+    lock      # waits for a start or reset in progress (which seeds the active session itself)
+    if lab_running; then
+      if [ -d "$SEED_TARGET/tasks" ]; then seed_session "$SEED_TARGET"; else run_seed "$SEED_TARGET"; fi
+      unlock
+      return 0
+    fi
+    unlock
+  fi
+  ok "Active session: $(active_session). Its seeds are applied automatically when the lab starts (./cks)."
+}
+
+cmd_reset() {   # [$1 = session to make active first]
+  need_podman
+  if [ $# -ge 1 ]; then record_session "$1"; fi
+  local prev; prev="$(creator)"
+  if [ "$(machine_state)" = running ] && engine_up && toolbox_running; then
+    lock
+    say "Deleting the cluster…"
+    delete_cluster
+    unlock
+  fi
+  cmd_up detached          # creates a fresh cluster and re-seeds the active session
+  if owner_alive; then echo shell > "$RUN/cluster-creator"
+  elif [ "$prev" = kept ]; then echo kept > "$RUN/cluster-creator"; fi
+}
+
+cmd_down() {
+  if ! find_podman; then ok "Nothing to destroy (Podman is not installed)."; return 0; fi
+  lock
+  if [ "$(machine_state)" = missing ]; then ok "Nothing to destroy."; return 0; fi
+  teardown_locked
+  ok "Lab destroyed. Your sessions/ and state/ files are kept; cached images stay in the VM for a fast restart."
+}
+
+cmd_session_end() {   # Claude Code SessionEnd hook: only tear down if no ./cks terminal owns the lab
+  if owner_alive; then return 0; fi
+  find_podman || return 0
+  [ "$(machine_state)" = running ] || return 0
+  if [ "$(creator)" = kept ]; then return 0; fi
+  detach "$ROOT/cks" down
+}
+
+cmd_purge() {
+  if [ "${1:-}" != --yes ]; then
+    if [ -t 0 ]; then
+      printf 'Delete the Podman VM "%s" with all lab images and caches? Your sessions/ stay. [y/N] ' "$MACHINE"
+      local a=""; read -r a || true
+      case "$a" in y|Y|yes|YES) ;; *) say "Aborted."; return 0 ;; esac
+    else
+      die "purge needs confirmation: ./cks purge --yes"
+    fi
+  fi
+  if find_podman; then
+    lock
+    if [ "$(machine_state)" != missing ]; then
+      say "Removing the Podman VM '$MACHINE'…"
+      pm rm -f "$MACHINE" >>"$LOGS/machine.log" 2>&1 || warn "podman machine rm failed (log: .cks/logs/machine.log)"
+    fi
+    unlock
+  fi
+  rm -rf "$STATE"
+  ok "Removed the VM '$MACHINE' and .cks/. Podman itself stays installed; uninstall it separately if you want."
+}
+
+cmd_addon() {
+  case "${1:-}" in
+    falco) ;;
+    kube-bench)
+      say "kube-bench is preinstalled on every node, as in the exam:"
+      say "  ./cks node $CP -- kube-bench run --targets master"
+      return 0 ;;
+    *) die "usage: ./cks addon falco" ;;
+  esac
+  require_lab
+  say "Installing Falco (chart $FALCO_CHART_VERSION, modern eBPF driver)…"
+  if ! p exec -i "$TOOLBOX" bash -c "set -euo pipefail
+      kubectl create namespace falco --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+      helm template falco falco --repo https://falcosecurity.github.io/charts --version '$FALCO_CHART_VERSION' \
+        --namespace falco -f '$ROOT/lab/addons/falco-values.yaml' | kubectl apply -n falco -f - >/dev/null"; then
+    die "Falco manifests could not be rendered or applied."
+  fi
+  if p exec -i "$TOOLBOX" kubectl -n falco rollout status daemonset/falco --timeout=300s; then
+    ok "Falco is running. Alerts: ./cks kubectl -n falco logs -l app.kubernetes.io/name=falco -f"
+  else
+    warn "Falco did not become ready. The VM kernel may not support its eBPF driver."
+    p exec -i "$TOOLBOX" kubectl -n falco logs daemonset/falco --tail=20 2>/dev/null || true
+    warn "Falco tasks fall back to rule files graded by /grade."
+    exit 3
+  fi
+}
+
+cmd_help() {
+  cat <<EOF
+${B}cks${N} - local CKS practice lab (Podman VM "$MACHINE", kind cluster "$CLUSTER", Kubernetes v1.37)
+
+  ./cks                      start the lab and open the exam shell; leaving it destroys the lab
+                             (CKS_KEEP=1 ./cks keeps it running; a 2nd ./cks opens an extra shell)
+  ./cks status               VM, toolbox, nodes, owner shell, active session
+  ./cks kubectl|k <args>     kubectl against the lab (runs in the toolbox)
+  ./cks node <node> [-- cmd] shell or command on a node (cks-control-plane, cks-worker)
+  ./cks seed <session|task>  make the session active and apply its .meta/seed.sh files
+                             (if the lab is down, they are applied when it starts)
+  ./cks addon falco          install Falco (best effort; kube-bench is preinstalled on nodes)
+  ./cks up                   start the lab without a shell; idempotent
+  ./cks reset [session]      fresh cluster, then seed the active (or given) session
+  ./cks down                 destroy the cluster and toolbox, stop the VM
+  ./cks purge [--yes]        remove the VM and every cached image (sessions/ stay)
+  ./cks verify-local         prove that nothing is exposed beyond 127.0.0.1
+
+Logs: .cks/logs/   Install/permissions/uninstall: quick-start.md
+EOF
+}
+
+case "${1:-}" in
+  "")              cmd_main ;;
+  up)              shift; cmd_up detached ;;
+  status)          shift; cmd_status "$@" ;;
+  kubectl|k)       shift; cmd_kubectl "$@" ;;
+  node)            shift; cmd_node "$@" ;;
+  seed)            shift; cmd_seed "$@" ;;
+  addon)           shift; cmd_addon "$@" ;;
+  reset)           shift; cmd_reset "$@" ;;
+  down)            shift; cmd_down ;;
+  purge)           shift; cmd_purge "$@" ;;
+  verify-local)    shift; find_podman || true; audit_local ;;
+  session-end)     shift; cmd_session_end ;;
+  help|-h|--help)  cmd_help ;;
+  *)               cmd_help >&2; exit 2 ;;
+esac

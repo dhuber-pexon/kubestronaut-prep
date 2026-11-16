@@ -1,0 +1,8 @@
+# Falco for runtime-security tasks. Installed on demand: ./cks addon falco
+# Chart version is pinned in ./cks (FALCO_CHART_VERSION). Nothing is exposed:
+# no Falcosidekick/UI, no Service of type LoadBalancer or NodePort.
+driver:
+  kind: modern_ebpf
+tty: true
+falcosidekick:
+  enabled: false

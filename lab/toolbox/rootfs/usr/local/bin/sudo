@@ -1,0 +1,16 @@
+#!/bin/sh
+# The lab already runs as root. This shim keeps exam muscle memory working:
+# `sudo -i`, `sudo su -` and `sudo <cmd>`.
+case "${1:-}" in
+  -i|-s|su) exec bash -l ;;
+  "") echo "usage: sudo <command>" >&2; exit 1 ;;
+esac
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -E|-H|-n|-k) shift ;;
+    -u) shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+exec "$@"

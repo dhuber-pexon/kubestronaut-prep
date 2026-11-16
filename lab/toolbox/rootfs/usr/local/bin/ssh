@@ -1,0 +1,31 @@
+#!/bin/bash
+# Exam-style `ssh <node>` for the CKS lab.
+# There is no real SSH: this opens a shell (or runs a command) inside one of the lab's
+# kind node containers. Only this lab's nodes are accepted; nothing listens on a port.
+set -euo pipefail
+
+host=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -*) shift ;;                       # ssh options are accepted and ignored
+    *) host="$1"; shift; break ;;
+  esac
+done
+host="${host#*@}"
+
+case "$host" in
+  controlplane|control-plane|cp|master|cks-controlplane|cks-master) host=cks-control-plane ;;
+  node01|node|worker|worker1|cks-node01|cks-node) host=cks-worker ;;
+esac
+
+nodes="$(cks-lab-nodes)"
+if [ -z "$host" ] || ! printf '%s\n' "$nodes" | grep -qx -- "$host"; then
+  echo "ssh: '${host:-<none>}' is not a lab node. Available: $(echo $nodes)" >&2
+  exit 255
+fi
+
+if [ $# -gt 0 ]; then
+  if [ -t 0 ] && [ -t 1 ]; then exec podman exec -it "$host" bash -lc "$*"; fi
+  exec podman exec -i "$host" bash -lc "$*"
+fi
+exec podman exec -it "$host" bash -l

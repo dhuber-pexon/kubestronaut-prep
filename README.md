@@ -1,168 +1,141 @@
-# Kubestronaut practice platform
+# CKS exam gym
 
-An **interactive exam gym** for Kubernetes and cloud-native certifications. You practice by solving challenges; an AI coding agent coaches you using the workflows in [`skills/`](skills/).
+A local, disposable practice lab for the **Certified Kubernetes Security Specialist (CKS)** exam, coached by
+**Claude Code**. You solve original exam-style challenges in a real Kubernetes v1.37 cluster; Claude generates
+the tasks, gives progressive hints, grades your answers and explains solutions.
 
-This is **not** a notes wiki — docs stay on [kubernetes.io](https://kubernetes.io/docs/) and the [CNCF curriculum](https://github.com/cncf/curriculum).
+**→ Just want to start? Read [quick-start.md](quick-start.md).**
 
-Beginners are welcome: you learn by doing, not by reading a second textbook in this repo.
+- **One dependency:** Podman (free, Apache-2.0). No Docker Desktop, Homebrew, kubectl or kind on your Mac.
+- **One entry point:** `./cks` in the VS Code terminal. Start, keep and destroy happen in the background.
+- **Strictly local:** nothing is reachable from your network or the internet, and `./cks verify-local` proves it.
+- **Private:** nothing outside this folder is changed; everything else lives in a dedicated Podman VM.
+- **Free and open source only:** no accounts, trials, subscriptions or hidden fees.
 
-### Certifications this gym can target
-
-| Cert | Full name | Typical format here |
-|------|-----------|---------------------|
-| **KCNA** | Kubernetes and Cloud Native Associate | Multiple-choice style drills |
-| **KCSA** | Kubernetes and Cloud Native Security Associate | Multiple-choice / conceptual security drills |
-| **CKAD** | Certified Kubernetes Application Developer | Hands-on YAML + `kubectl` (refresh OK if you already passed) |
-| **CKA** | Certified Kubernetes Administrator | Hands-on cluster admin labs (core focus) |
-| **CKS** | Certified Kubernetes Security Specialist | Hands-on security labs (hard mode; some items file-graded on kind/macOS) |
-
-Together, **KCNA + KCSA + CKAD + CKA + CKS** are the path to the CNCF **Kubestronaut** title (all must be active at once). Ask `/create-tasks` with the cert you care about, e.g. “KCSA questions” or “hard CKS harden tasks”.
-
-Related CNCF certs outside that set (Prometheus, Istio, GitOps, …) are optional later — this repo stays focused on the Kubernetes track unless you ask otherwise.
-
----
-
-## Prerequisites
-
-- A coding agent that can read this repo  
-- [kubectl](https://kubernetes.io/docs/tasks/tools/)  
-- [kind](https://kind.sigs.k8s.io/) + Docker (recommended for CKA / CKAD / CKS labs)
-
-Associate exams (**KCNA**, **KCSA**) work well without a cluster. Performance exams (**CKAD**, **CKA**, **CKS**) are better with the kind lab.
+This is not a notes wiki. Docs stay on [kubernetes.io](https://kubernetes.io/docs/). The curriculum the tasks are built
+from is in Markdown in [.claude/skills/create-tasks/reference.md](.claude/skills/create-tasks/reference.md).
 
 ---
 
 ## How it works
 
 ```text
-/setup-cluster  →  /create-tasks (or /exam-session)
-                         │
-                         ▼
-              sessions/<id>/ appears locally
-                         │
-                         ▼
-              you edit each task’s work/
-                    ▲         │
-                    │         ▼
-                 /hint     /review
-                              │
-                              └── /explain-solution (when you want the full walkthrough)
+ VS Code terminal                         Claude Code panel
+ ────────────────                         ─────────────────
+ ./cks ──► Podman VM "cks" (only sees this folder)
+             ├─ cks-toolbox   kubectl, kind, trivy, kubesec, kube-linter, cosign, bom, helm
+             └─ kind cluster "cks"  (cks-control-plane + cks-worker, Kubernetes v1.37)
+ exam shell: k, ssh <node>, vim  ◄────── /create-tasks · /exam-session  → sessions/<id>/
+                                         /hint · /grade · /explain-solution
+ exit ──► lab destroyed in the background, VM stopped
 ```
 
-1. Tell the agent a **skill command** (table below).
-2. The agent follows the matching file under [`skills/`](skills/) and (for create/exam) writes a new folder under `sessions/`.
-3. You solve only in `work/`.
-4. You call `/review`, `/hint`, or `/explain-solution` on that session/task.
+1. `./cks` creates or starts the VM, builds the images (first time only), creates a fresh cluster, seeds your active
+   session, runs the local-only audit and opens the exam shell.
+2. In the Claude Code panel, run `/create-tasks` or `/exam-session`. Tasks appear under `sessions/` (gitignored).
+3. Solve in the exam shell and put your answers in each task's `work/`.
+4. `/hint`, `/grade`, `/explain-solution`. `/grade` updates `state/progress.md` (local) so later tasks target your weak domains.
+5. `exit` destroys the lab. Next time, `./cks` builds a fresh one.
 
-**`sessions/` is gitignored.** Your drills and answers stay on your machine. Nothing to commit after practice — generate a fresh session whenever you like.
+## Skills
 
----
+| You type (Claude Code panel) | Does |
+|---|---|
+| `/create-tasks [count] [topic] [difficulty]` | Short drill (3–5 tasks) under `sessions/` |
+| `/exam-session` | 2 h mock exam: 15–16 tasks, 100 points, pass at 67 %, fresh cluster |
+| `/hint [task]` | One progressive hint (level 1 → 3) |
+| `/grade [task or session]` | Grades `work/` plus read-only live probes; whole sessions are graded in parallel |
+| `/explain-solution [task]` | Full annotated walkthrough |
 
-## Skills — what to say to the agent
+Skill definitions: [.claude/skills/](.claude/skills/). Rules for Claude: [CLAUDE.md](CLAUDE.md).
 
-Any coding agent that reads [`AGENTS.md`](AGENTS.md) should open the skill file and follow it.
+## `./cks` commands
 
-| You say | Skill file | What it does |
-|---------|------------|--------------|
-| `/setup-cluster` | [`skills/setup-cluster/SKILL.md`](skills/setup-cluster/SKILL.md) | Create / destroy / check the local kind lab |
-| `/create-tasks` | [`skills/create-tasks/SKILL.md`](skills/create-tasks/SKILL.md) | **Create a short drill session** under `sessions/` |
-| `/exam-session` | [`skills/exam-session/SKILL.md`](skills/exam-session/SKILL.md) | **Create a long mock exam session** (~2h) |
-| `/review` | [`skills/review-answer/SKILL.md`](skills/review-answer/SKILL.md) | Grade your `work/` (+ cluster if up) |
-| `/hint` | [`skills/hint/SKILL.md`](skills/hint/SKILL.md) | One progressive hint (3 levels) |
-| `/explain-solution` | [`skills/explain-solution/SKILL.md`](skills/explain-solution/SKILL.md) | Full annotated walkthrough |
+| Command | Does |
+|---|---|
+| `./cks` | Start the lab if needed and open the exam shell. Leaving it destroys the lab (`CKS_KEEP=1 ./cks` keeps it). A second `./cks` opens an extra shell. |
+| `./cks status` | VM, toolbox, nodes, owner shell, active session |
+| `./cks kubectl …` / `./cks k …` | kubectl against the lab |
+| `./cks node <node> [-- cmd]` | Shell or command on `cks-control-plane` / `cks-worker` |
+| `./cks seed <session or task>` | Make a session active and apply its seeds (or apply them on the next start) |
+| `./cks addon falco` | Install Falco (best effort; kube-bench is preinstalled on the nodes) |
+| `./cks reset [session]` | Fresh cluster, then seed the active (or given) session |
+| `./cks up` | Start without a shell |
+| `./cks down` | Destroy the cluster and toolbox, stop the VM |
+| `./cks purge` | Remove the VM and every cached image (sessions stay) |
+| `./cks verify-local` | Prove that nothing is exposed beyond 127.0.0.1 |
 
-You can add plain English, for example:
+## What is practised live, and what is file-graded
 
-- `/create-tasks` focus on CKA troubleshooting, make them hard  
-- `/create-tasks` KCNA multiple-choice, 5 tasks  
-- `/create-tasks` KCSA security concepts  
-- `/create-tasks` CKS harden + NetworkPolicy, killer difficulty  
-- `/review` task 02 in the latest session  
-- `/hint` for harbor-netpol  
+| Live in the lab | File-graded (VM limits) |
+|---|---|
+| NetworkPolicy, RBAC, ServiceAccounts, Pod Security Admission, securityContext, immutability | AppArmor (the VM kernel has no AppArmor) |
+| Secrets + encryption at rest (verified with `etcdctl`) | Running gVisor (RuntimeClass objects are live) |
+| seccomp RuntimeDefault / Localhost profiles | Cilium / Istio pod-to-pod encryption |
+| kube-apiserver flags: audit policy and log, admission plugins, anonymous auth | kubeadm upgrade |
+| kubelet config, kube-bench (CIS) on the nodes | Ingress TLS (spec only, no ingress controller) |
+| ValidatingAdmissionPolicy (permitted registries), ImagePolicyWebhook config | |
+| trivy, kubesec, kube-linter, bom (SBOM), cosign (local keys) | |
+| binary checksum verification, node OS footprint (services, packages, users) | |
+| Falco rules and alerts (`./cks addon falco`, best effort) | |
 
----
+## Local-only and privacy guarantees
 
-## Creating a session (step by step)
+- **Structural:** the toolbox publishes no ports. kind publishes only the API server, on `127.0.0.1`.
+  The kubeconfig exists only inside the toolbox and points at the internal network. NodePorts and hostPorts stay inside the VM.
+- **Audited (fail closed):** every start, and `./cks verify-local`, inspect the port bindings and network mode of every lab
+  container and cross-check the Mac's listening sockets. Any binding other than `127.0.0.1` destroys the lab.
+- **Guarded:** a Claude Code hook ([.claude/hooks/guard.sh](.claude/hooks/guard.sh)) blocks commands that would publish ports,
+  open tunnels, install software on the Mac or upload project content. Tests: `bash .claude/hooks/test-guards.sh`.
+- **Contained:**
 
-### 0. Optional lab
+  | Where | What |
+  |---|---|
+  | This folder | `.cks/` (run state, logs), `sessions/`, `state/progress.md`, `.claude/settings.local.json`; all gitignored |
+  | Podman VM `cks` | images, cluster, kubeconfig, trivy cache |
+  | Outside both | only Podman's own record of the VM (removed by `./cks purge`), plus the one-time macOS folder permission |
+  | Never touched | `~/.kube`, `~/.docker`, shell profiles, `/etc`, Homebrew, launchd, keychain |
 
-```bash
-./cluster/up.sh          # or ask: /setup-cluster
-./cluster/status.sh
+- **Claude Code:** project settings deny MCP connectors and Artifacts, ask before web access, and set
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (telemetry, error reporting and auto-update checks off, where your Claude Code
+  version honours it in project settings). Claude Code keeps its own conversation history in `~/.claude`; that is outside
+  this repo's control.
+
+## Open source components
+
+| Component | Licence | Where it runs |
+|---|---|---|
+| Podman | Apache-2.0 | Mac (only install) + VM |
+| kind, kubectl, Kubernetes, etcd | Apache-2.0 | VM containers |
+| trivy, kube-bench | Apache-2.0 | toolbox / nodes |
+| kubesec, kube-linter, cosign, bom, helm | Apache-2.0 | toolbox |
+| Falco | Apache-2.0 | cluster (on demand) |
+| Debian base image | DFSG free licences | toolbox |
+
+Every downloaded binary is pinned to a version and checked against its published sha256
+([lab/toolbox/Dockerfile](lab/toolbox/Dockerfile), [lab/node/Dockerfile](lab/node/Dockerfile)).
+
+Docker Desktop is deliberately not used: its licence is free only for some users, it collects usage data by default,
+and it shares your whole home folder with its VM. The engine-specific code is one section of `./cks`, if you ever need to switch.
+
+## Repository layout
+
 ```
-
-Hands-on CKA/CKS tasks are better with a cluster. KCNA-style MCQs work without one.
-
-### 1. Ask the agent to generate work
-
-Say **`/create-tasks`** (short drill) or **`/exam-session`** (full mock).
-
-The agent will:
-
-- Read `state/progress.md` if present (weak topics); otherwise use [`state/progress.example.md`](state/progress.example.md) as empty baseline
-- Follow [`skills/create-tasks/SKILL.md`](skills/create-tasks/SKILL.md) (or exam-session)
-- Create something like:
-
-```text
-sessions/20260921-0915-drill/     # local only (gitignored)
-  SESSION.md
-  tasks/
-    01-some-slug/
-      TASK.md          ← read this
-      work/            ← you write answers here
-      .meta/           ← grading key; agent uses on /review
+cks                    entry point (macOS bash 3.2, no other dependencies)
+quick-start.md         install, prompts, first run, uninstall
+CLAUDE.md              rules for Claude Code in this repo
+lab/kind.yaml          cluster definition (API on 127.0.0.1, no port mappings)
+lab/toolbox/           toolbox image: pinned CLIs, exam bashrc, ssh/sudo shims, teardown
+lab/node/              node image: kindest/node v1.37 + vim, etcdctl, kube-bench, docker.io mirror
+lab/addons/            Falco values
+.claude/settings.json  permissions, hooks, env
+.claude/hooks/         session start/end, guards, guard tests
+.claude/skills/        /create-tasks, /exam-session, /grade, /hint, /explain-solution
+.claude/agents/        cks-grader (read-only grading subagent)
+sessions/              your drills and answers (gitignored)
+state/                 your progress (gitignored, except the example)
 ```
-
-### 2. Solve
-
-- Open `TASK.md` for task `01-…`
-- Put answers **only** in that task’s `work/`
-  - Hands-on (CKAD / CKA / CKS): YAML and/or `commands.sh` (apply with `kubectl` if you want)
-  - Associate (KCNA / KCSA): `answers.md` with lines like `1. B`
-- Do not edit `TASK.md`. Do not ask the agent to fill `work/` while you are still solving.
-
-### 3. Coach loop
-
-| Situation | Say |
-|-----------|-----|
-| Need a nudge | `/hint` |
-| Think you are done | `/review` |
-| Want the full solution explained | `/explain-solution` |
-| Want more practice | `/create-tasks` again (new session folder) |
-
-`/review` updates local `state/progress.md` (gitignored) so later `/create-tasks` can target weak areas. Copy [`state/progress.example.md`](state/progress.example.md) once if the file does not exist yet.
-
----
-
-## What lives in the repo vs on your disk
-
-| Path | In git? | Purpose |
-|------|---------|---------|
-| [`skills/`](skills/) | yes | Agent workflows — how to create/review/hint |
-| [`AGENTS.md`](AGENTS.md) | yes | Hard rules for every agent |
-| [`templates/`](templates/) | yes | Blank TASK + rubric shapes |
-| [`cluster/`](cluster/) | yes | kind lab scripts |
-| [`state/README.md`](state/README.md) + example | yes | How learner progress works |
-| `state/progress.md` | **no** | Your scores / weak domains (local) |
-| `sessions/*` | **no** | Generated drills + your answers (local) |
-| `cluster/kubeconfig`, `*.kubeconfig` | **no** | Local cluster credentials |
-
----
-
-## Tips for beginners
-
-1. One task at a time (`01` before `02`).
-2. Use https://kubernetes.io/docs/ while solving (same idea as the real exams).
-3. Prefer `/hint` → try again → `/review` over jumping to `/explain-solution`.
-4. PARTIAL on review is normal — fix `work/` and review again.
-5. Delete old `sessions/…` folders anytime; they are disposable. Create new ones with the skills.
-
----
 
 ## Not in scope
 
-- Copying kubernetes.io into markdown files here  
-- Leaked real exam items  
-- Committing your practice sessions  
-
-**Start:** open a chat on this repo → `/setup-cluster` → `/create-tasks`.
+Copying kubernetes.io into this repo, leaked exam items, paid practice platforms, and committing your sessions.

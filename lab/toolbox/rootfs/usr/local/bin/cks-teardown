@@ -1,0 +1,25 @@
+#!/bin/bash
+# Runs inside the short-lived cks-reaper container that ./cks starts for teardown.
+# Podman owns this process, so the teardown completes even if the terminal or the
+# Claude session that started it is already gone.
+set -u
+CLUSTER="${CKS_CLUSTER:-cks}"
+
+echo "[reaper] deleting kind cluster '${CLUSTER}'"
+kind delete cluster --name "$CLUSTER" || true
+
+# Leftovers, e.g. from a half-created cluster. -v also drops each node's /var volume.
+ids="$(podman ps -aq --filter "label=io.x-k8s.kind.cluster=${CLUSTER}" 2>/dev/null || true)"
+if [ -n "$ids" ]; then
+  podman rm -f -v -t 1 $ids >/dev/null 2>&1 || true
+fi
+
+# kind's podman provider keeps each node's /var in a named volume.
+vols="$(podman volume ls -q --filter "label=io.x-k8s.kind.cluster=${CLUSTER}" 2>/dev/null || true)"
+if [ -n "$vols" ]; then
+  podman volume rm -f $vols >/dev/null 2>&1 || true
+fi
+
+echo "[reaper] removing toolbox"
+podman rm -f -v -t 1 cks-toolbox >/dev/null 2>&1 || true
+echo "[reaper] done"
