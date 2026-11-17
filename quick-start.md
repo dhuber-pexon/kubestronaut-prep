@@ -36,6 +36,8 @@ Not needed: Docker Desktop, Homebrew, kubectl, kind, helm, trivy, Python package
 
 ## Stopping
 
+- **Before quitting VS Code, type `exit` in the exam shell.** Quitting VS Code directly is safe (the lab stops, nothing stays
+  exposed), but it skips the snapshot of your live work that `/grade` uses afterwards.
 - Type `exit` (or `logout`) in the exam shell and confirm (Enter = yes). The lab is **destroyed** in the background and the VM
   stops within about 20 seconds.
   Your `sessions/` and `state/` files stay. Closing the terminal tab does the same.
