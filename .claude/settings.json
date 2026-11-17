@@ -55,7 +55,6 @@
     ],
     "SessionEnd": [
       {
-        "matcher": "prompt_input_exit|logout|other",
         "hooks": [
           {
             "type": "command",

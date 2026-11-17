@@ -35,8 +35,8 @@ There is **no** kubectl, kind, helm, trivy or docker on the Mac, and none may be
 
 - **Don't start the lab on your own.** The learner starts it with `./cks`. Use `./cks up` only when the learner asks you to.
 - Long `./cks` commands (`up`, `reset`, `addon`) can take minutes: run them in the background.
-- Lifecycle is automatic. Leaving the `./cks` shell destroys the cluster; ending your session destroys it if no `./cks` shell owns it.
-  `CKS_KEEP=1 ./cks` keeps it.
+- Lifecycle is automatic. Leaving the `./cks` shell destroys the cluster; ending your session (closing the chat tab, not `/clear`)
+  destroys it if no `./cks` shell owns it. Every session end is logged in `.cks/logs/session-end.log`. `CKS_KEEP=1 ./cks` keeps it.
 - Paths: the repo is mounted at the same path inside the lab, so `./cks kubectl apply -f sessions/<id>/tasks/<t>/work/x.yaml` works.
 - The cluster is called `cks` (Kubernetes v1.37): nodes `cks-control-plane` and `cks-worker`, kindnet CNI (NetworkPolicy enforced).
   In the exam shell, `ssh <node>` opens a node shell and `sudo -i` works.
