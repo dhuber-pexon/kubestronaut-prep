@@ -1,73 +1,104 @@
 # Quick start
 
-The short version: **install Podman once, then run `./cks`.** Everything else happens automatically.
+**Short version:** install Podman once, then run `./cks` in the VS Code terminal, then type `/exam-session`
+(or `/create-tasks`) in the Claude Code panel.
 
-## What you need
+Everything runs locally in a private VM that can only see this folder. Nothing is reachable from your network,
+and no account is needed besides your Claude account.
 
-| Item | What it means for you |
-|---|---|
-| **Install (once)** | **Podman**: download `podman-installer-macos-arm64.pkg` from the official releases page, https://github.com/podman-container-tools/podman/releases (latest stable release, not an `-rc`), and run it. The installer asks for your macOS admin password once. This is the **only** install. Podman is free and open source (Apache-2.0). |
-| **Skip the installer's last step** | The installer ends by suggesting `podman machine init`. **Don't run it**: `./cks` creates its own VM. That default VM (`podman-machine-default`) would share your whole `/Users` folder. If you already ran it, remove it: `podman machine rm podman-machine-default`. |
-| **Remove the extra helper (recommended)** | The installer also adds `podman-mac-helper`, a root background service that points the standard Docker socket at Podman. The lab doesn't use it. Remove it with `sudo /opt/podman/bin/podman-mac-helper uninstall` (reinstall anytime with `… install`). A leftover socket file in `/var/run` disappears at the next reboot. |
-| **Already in place** | VS Code with the Claude Code extension, signed in to your existing Claude account. That is the only account involved; this project doesn't create one. |
-| **Accounts, logins, tokens** | **None.** No Docker Hub, GitHub, registry, Linux Foundation or cloud login, and no API keys. Images and tools are downloaded anonymously. |
-| **Possible macOS prompt** | On the first start, macOS **may** ask whether Podman's VM helper (shown as *krunkit* or *vfkit*) may access files in your **Documents** folder. Click **Allow**. Started from the VS Code terminal there is usually no prompt, because VS Code already has that access. Either way, the VM shares **only this project folder**, and that is checked on every start. |
-| **Internet** | First run: about 2–3 GB (VM image, toolbox, Kubernetes node image). Later: only task images and trivy database updates. Outbound downloads only; nothing is exposed. |
-| **Disk / RAM / CPU** | The VM grows to about 15–20 GB (40 GB max) and uses 4 CPUs and 6 GB RAM, **only while the lab runs**. |
+## One-time setup
 
-Not needed: Docker Desktop, Homebrew, kubectl, kind, helm, trivy, Python packages, or any extra VS Code extension.
-
-## Start practising
-
-1. Open this folder in VS Code and open the terminal (`` Ctrl+` ``).
-2. Run:
+1. **Install Podman**, the only install. Download `podman-installer-macos-arm64.pkg` from
+   https://github.com/podman-container-tools/podman/releases (the latest stable release, not an `-rc`) and run it.
+   It asks for your macOS admin password once.
+2. **Skip the installer's last step** (`podman machine init`): `./cks` creates its own VM. If you already ran it,
+   remove that default VM, because it shares your whole `/Users` folder:
    ```bash
-   ./cks
+   podman machine rm podman-machine-default
    ```
-   The first run takes about 4–10 minutes, depending on your connection (measured: about 4 minutes): the VM is created and the
-   images are built. Later starts take about 1 minute (measured: 48 s), because the images stay cached in the VM.
-   You end up in the **exam shell** (`cks:…$`), which has `kubectl` (alias `k`), completion, vim, trivy, kubesec, kube-linter, cosign and bom.
-3. In the **Claude Code panel**, type `/create-tasks`, for example `/create-tasks 3 tasks, audit logs and NetworkPolicies, hard`,
-   or `/exam-session` for a 2-hour mock exam.
-4. Open the task's `TASK.md` and solve it in the exam shell:
-   - `cd sessions/<id>/tasks/01-…` and put your manifests and commands into `work/`
-   - node work as in the exam: `ssh cks-control-plane` (or `ssh cks-worker`), then `sudo -i`
-5. Coach loop in the Claude Code panel: `/hint` → try again → `/grade` → `/explain-solution` if you're stuck.
+3. **Recommended:** remove the helper service the installer adds. The lab doesn't use it.
+   ```bash
+   sudo /opt/podman/bin/podman-mac-helper uninstall
+   ```
+4. Open this folder in VS Code with the Claude Code extension, signed in to your Claude account.
 
-## Stopping
+| Good to know | |
+|---|---|
+| Accounts, logins, tokens | **None** besides your Claude account. Images and tools are downloaded anonymously. |
+| macOS prompt | On the first start, macOS **may** ask whether *krunkit* or *vfkit* may access your Documents folder: click **Allow**. From the VS Code terminal there is usually no prompt. |
+| Internet | The first start downloads a few GB (VM, tools, Kubernetes). Later only task images and scanner updates. Outbound only. |
+| Resources | 4 CPUs and 6 GB RAM, **only while the lab runs**. The VM disk can grow up to 40 GB. |
 
-- **Before quitting VS Code, type `exit` in the exam shell.** Quitting VS Code directly is safe (the lab stops, nothing stays
-  exposed), but it skips the snapshot of your live work that `/grade` uses afterwards.
-- Type `exit` (or `logout`) in the exam shell and confirm (Enter = yes). The lab is **destroyed** in the background and the VM
-  stops within about 20 seconds.
-  Your `sessions/` and `state/` files stay. Closing the terminal tab does the same.
-- `n` at the prompt takes you back to the shell. Ctrl-D is ignored ("Use logout to leave the shell"), so you can't leave by accident.
-- `CKS_KEEP=1 ./cks` keeps the lab running after you leave. Destroy it later with `./cks down`.
-- Right before the lab is destroyed, the live state of your active session is saved to `sessions/<id>/.lab-snapshot/`
-  (Secret values and keys are never saved). `/grade` uses it while the lab is off, so you can grade after leaving.
-- Starting again with `./cks` builds a fresh cluster and re-applies the seeds of your active session. Re-apply your `work/`
-  if you want to keep working on the live state.
+## Every time you practise
 
-## Nothing to do (automatic)
+### 1. Start the lab
 
-Creating, starting and stopping the VM, the lab network, the images, the cluster, the kubeconfig, seeding and teardown are all
-handled by `./cks` inside the VM. Nothing is written to `~/.kube`, `~/.docker` or your shell profile.
+Open the VS Code terminal (`` Ctrl+` ``) and run:
+
+```bash
+./cks
+```
+
+- The first start takes about 4–10 minutes (the VM and images are built once). Later starts take about 1 minute.
+- You land in the **exam shell** (`cks:…$`): `k` is kubectl (with completion); vim, trivy, kubesec, kube-linter, cosign
+  and bom are installed. Node access works as in the exam: `ssh cks-control-plane` or `ssh cks-worker`, then `sudo -i`.
+- Keep this terminal open while you practise.
+
+### 2a. Mock exam (2 hours)
+
+1. In the Claude Code panel, type `/exam-session`.
+2. **Approve the permission prompt for `./cks reset`.** It gives you a fresh cluster, like the real exam. Your exam shell stays open.
+3. Wait for the task table. Generating 15–16 tasks takes a few minutes.
+4. **Note the time: you have 2 hours.** No timer is enforced. Work through the tasks in the Explorer under
+   `sessions/<id>/tasks/01-…`, `02-…` and so on. If a task takes about twice its suggested time, skip it and come back later.
+5. When you're done: `/grade sessions/<id>`. You get a score out of 100; the pass mark is 67.
+
+Docs allowed, as in the real exam: https://kubernetes.io/docs/ and the docs of the lab's tools.
+
+### 2b. Short drill
+
+Type `/create-tasks` with what you want to practise, for example `/create-tasks 3 tasks, audit logs and NetworkPolicies, hard`.
+
+### 3. Solve tasks
+
+- Read each task's `TASK.md`, and don't edit it.
+- Work in the exam shell. Save every manifest and command in that task's **`work/`** folder (for example `work/commands.sh`).
+  After editing a file on a node, also save a copy of it in `work/`.
+- Coach loop in the Claude Code panel: `/hint` (3 levels, one at a time), then `/grade`, then `/explain-solution` if you're stuck.
+  `/grade 02` grades task 02 of the latest session.
+
+### 4. Stop
+
+- Type `exit` in the exam shell and press Enter. The lab is destroyed in the background and the VM stops (about 20 s).
+  Your `sessions/` and `state/` folders stay.
+- **Always `exit` before quitting VS Code.** Quitting directly is safe, but it skips saving your live work for `/grade`.
+- `n` at the "destroy?" prompt takes you back to the shell. Ctrl-D does nothing, so you can't leave by accident.
+  `CKS_KEEP=1 ./cks` keeps the lab running after you leave; stop it later with `./cks down`.
+
+**After you stop:**
+- `/grade` still works. Your live state was saved to `sessions/<id>/.lab-snapshot/` (Secret values and keys are never saved).
+- The next `./cks` gives you a fresh cluster with the starting state of your tasks. To continue live work, re-apply your
+  manifests in the exam shell, e.g. `k apply -f sessions/<id>/tasks/<task>/work/netpol.yaml`. Apply only your manifests,
+  not the copies of node files, and redo node edits by hand.
 
 ## Troubleshooting
 
 | Symptom | Do |
 |---|---|
+| `Podman is not installed` right after installing it | Open a new terminal, so it picks up Podman's path |
+| "Found a leftover cluster from an earlier session; rebuilding it fresh" | Nothing: that's the expected cleanup after quitting VS Code without `exit` |
 | Something looks off | `./cks status` |
-| Want proof nothing is exposed | `./cks verify-local` |
+| You want proof that nothing is exposed | `./cks verify-local` |
 | Cluster broken beyond repair (e.g. kube-apiserver won't come back) | `./cks reset` |
 | "The VM cannot read this project folder" | System Settings → Privacy & Security → Files and Folders → allow the Podman VM helper, then `./cks` |
-| "Another Podman VM is running" | `podman machine list`, then stop the other one with `podman machine stop <name>` |
-| Logs | `.cks/logs/` (machine, build, cluster, seed, teardown) |
-| More commands | `./cks help` |
+| "Another Podman VM is running" | `podman machine list`, then `podman machine stop <name>` |
+| Logs | `.cks/logs/` |
+| All commands | `./cks help` |
 
 ## Uninstall
 
 1. `./cks purge` removes the VM, all lab images and caches, and `.cks/`. Your `sessions/` stay.
 2. If still installed, remove the helper: `sudo /opt/podman/bin/podman-mac-helper uninstall`.
-3. Uninstall Podman: run `/opt/podman/bin/podman-uninstall` if your release ships it, or delete `/opt/podman` and `/etc/paths.d/podman-pkg` (admin rights needed).
+3. Uninstall Podman: run `/opt/podman/bin/podman-uninstall` if your release ships it, or delete `/opt/podman` and
+   `/etc/paths.d/podman-pkg` (admin rights needed).
 4. Delete this folder if you're done.
