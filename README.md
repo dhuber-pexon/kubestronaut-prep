@@ -64,6 +64,8 @@ Skill definitions: [.claude/skills/](.claude/skills/). Rules for Claude: [CLAUDE
 | `./cks down` | Destroy the cluster and toolbox, stop the VM |
 | `./cks purge` | Remove the VM and every cached image (sessions stay) |
 | `./cks verify-local` | Prove that nothing is exposed beyond 127.0.0.1 |
+| `./cks selftest` | Static checks of the repo: syntax, bash 3.2 pitfalls, guard tests, ShellCheck, privacy (about 10 s; ShellCheck needs the lab) |
+| `./cks smoke` | Functional check of the running lab: 18 CKS capabilities and offline tools (about 45 s; cleans up after itself) |
 
 ## What is practised live, and what is file-graded
 

@@ -112,4 +112,6 @@ Create sessions only via `/create-tasks` or `/exam-session`. Never commit sessio
 
 - Tool versions and checksums: `lab/toolbox/Dockerfile`, `lab/node/Dockerfile` (pin + sha256, open source only).
 - Images rebuild automatically when their folder changes.
-- After editing hooks, run `bash .claude/hooks/test-guards.sh`. After editing `cks`, run `/bin/bash -n cks` (macOS bash 3.2).
+- After any change to the repo, run `./cks selftest` (syntax, bash 3.2 pitfalls, guard tests, ShellCheck, privacy checks).
+  After changes to the lab (Dockerfiles, `cks`, `lab/`), also run `./cks smoke` against a running lab.
+- New guard rules get a case in `.claude/hooks/test-guards.sh`; new lab capabilities get a check in `lab/tests/smoke.sh`.

@@ -38,7 +38,6 @@ mkdir -p "$RUN" "$LOGS"
 # lab (bare ./cks), hand the lab to the background teardown.
 OWNER=0
 LOCK_HELD=0
-CLUSTER_CREATED=0
 on_exit() {
   if [ "$LOCK_HELD" = 1 ]; then rm -rf "$RUN/lock"; LOCK_HELD=0; fi
   if [ "$OWNER" = 1 ]; then finish_owner; fi
@@ -197,7 +196,8 @@ build_image() {   # tag context [build args…]
   local tag="$1" ctx="$2"; shift 2
   if p image exists "$tag" 2>/dev/null; then return 0; fi
   say "Building ${tag#localhost/} (first time takes a few minutes; progress: .cks/logs/)…"
-  local blog="$LOGS/build-$(basename "$ctx").log"
+  local blog
+  blog="$LOGS/build-$(basename "$ctx").log"
   if ! p build --pull=missing --label "$LABEL" -t "$tag" "$@" "$ctx" >>"$blog" 2>&1; then
     tail -n 30 "$blog" >&2
     die "Image build failed (log: .cks/logs/build-$(basename "$ctx").log)."
@@ -289,7 +289,6 @@ create_cluster() {   # $1 = shell | detached
     p exec -i "$TOOLBOX" kind delete cluster --name "$CLUSTER" >>"$LOGS/cluster.log" 2>&1 || true
   done
   printf '%s\n' "$1" > "$RUN/cluster-creator"
-  CLUSTER_CREATED=1
   export_kubeconfig
   local n
   for n in $(lab_nodes); do   # a VM restart must never bring an old cluster back
@@ -786,6 +785,96 @@ cmd_purge() {
   ok "Removed the VM '$MACHINE' and .cks/. Podman itself stays installed; uninstall it separately if you want."
 }
 
+# --------------------------------------------------------------------------------------------
+# Self-tests: ./cks selftest (static, no lab needed) and ./cks smoke (the running lab)
+# --------------------------------------------------------------------------------------------
+SHELLCHECK_IMAGE="docker.io/koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d"  # v0.11.0, GPL-3.0
+T_FAILS=0
+t_ok()   { printf 'PASS  %-24s %s\n' "$1" "${2:-}"; }
+t_bad()  { printf 'FAIL  %-24s %s\n' "$1" "${2:-}"; T_FAILS=$((T_FAILS + 1)); }
+t_skip() { printf 'SKIP  %-24s %s\n' "$1" "${2:-}"; }
+first3() { printf '%s\n' "$1" | head -3 | cut -c1-120 | tr '\n' ' '; }
+
+shell_files() {   # every shell script of the repo, as relative paths
+  {
+    ls cks .claude/hooks/*.sh lab/tests/*.sh .claude/skills/create-tasks/templates/seed.sh 2>/dev/null
+    find lab/toolbox/rootfs lab/node/rootfs -type f \( -path '*/bin/*' -o -name '*.sh' -o -name .bashrc \) 2>/dev/null
+  } | LC_ALL=C sort -u
+}
+
+cmd_selftest() {
+  cd "$ROOT"
+  local f files bad out count
+  files="$(shell_files)"
+  count="$(printf '%s\n' "$files" | wc -l | tr -d ' ')"
+
+  bad=""
+  for f in $files; do
+    if head -1 "$f" | grep -q '^#!/bin/sh'; then /bin/sh -n "$f" 2>/dev/null || bad="$bad $f"
+    else /bin/bash -n "$f" 2>/dev/null || bad="$bad $f"; fi
+  done
+  if [ -z "$bad" ]; then t_ok syntax "$count scripts"; else t_bad syntax "$bad"; fi
+
+  # macOS bash 3.2 reads the bytes of a non-ASCII character after $var as part of the name (finding F14).
+  # shellcheck disable=SC2086
+  out="$(LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~[:space:]]' $files 2>/dev/null || true)"
+  if [ -z "$out" ]; then t_ok bash32-utf8 "no \$var directly before a non-ASCII character"; else t_bad bash32-utf8 "$(first3 "$out")"; fi
+
+  out="$(grep -nE 'declare -A|\$\{[A-Za-z_]+(,,|\^\^)|mapfile|readarray|&>>|\|&|coproc|\$BASHPID' cks .claude/hooks/*.sh 2>/dev/null | grep -v 'selftest:ignore' || true)"  # selftest:ignore
+  if [ -z "$out" ]; then t_ok bash32-syntax "Mac-side scripts use no bash-4-only syntax"; else t_bad bash32-syntax "$(first3 "$out")"; fi
+
+  out="$(bash .claude/hooks/test-guards.sh 2>&1 | tail -1)"
+  case "$out" in *", 0 failed") t_ok guard-tests "$out" ;; *) t_bad guard-tests "$out" ;; esac
+
+  bad=""
+  for f in .claude/settings.json lab/toolbox/rootfs/etc/cosign/offline-signing-config.json; do
+    /usr/bin/plutil -convert json -o /dev/null "$f" 2>/dev/null || bad="$bad $f"
+  done
+  if [ -z "$bad" ]; then t_ok json "settings and signing config parse"; else t_bad json "$bad"; fi
+
+  if audit_static >/dev/null 2>&1; then t_ok kind-config "API on 127.0.0.1, no port mappings or host mounts"
+  else t_bad kind-config "see ./cks verify-local"; fi
+
+  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    out="$(git ls-files | grep -iE '\.pdf$|^\.cks/|^state/progress\.md$|^\.claude/settings\.local\.json$|^sessions/.+/' || true)"
+    if [ -z "$out" ]; then t_ok tracked-files "no PDFs, sessions, progress or local state in git"; else t_bad tracked-files "$(first3 "$out")"; fi
+    out="$(git ls-files -z | xargs -0 grep -nIiwE 'cka|ckad|kcna|kcsa' 2>/dev/null | grep -v 'selftest:ignore' || true)"  # selftest:ignore
+    if [ -z "$out" ]; then t_ok cks-only "no other certifications"; else t_bad cks-only "$(first3 "$out")"; fi
+    out="$(git ls-files -z | xargs -0 grep -nIlF "$HOME/" 2>/dev/null || true)"
+    if [ -z "$out" ]; then t_ok no-home-paths "no absolute paths of this Mac in tracked files"; else t_bad no-home-paths "in: $(first3 "$out")"; fi
+  else
+    t_skip tracked-files "not a git checkout"
+  fi
+
+  # Static analysis with ShellCheck (errors only) in a container without network; needs the VM.
+  if find_podman && [ "$(machine_state)" = running ] && engine_up; then
+    # shellcheck disable=SC2086
+    if out="$(p run --rm --network none --security-opt label=disable -v "$ROOT:$ROOT:ro" -w "$ROOT" \
+        "$SHELLCHECK_IMAGE" -S error -s bash $files 2>&1)"; then
+      t_ok shellcheck "no errors in $count scripts"
+    else
+      t_bad shellcheck "$(first3 "$(printf '%s\n' "$out" | grep -E '^In |SC[0-9]{4}')")"
+    fi
+  else
+    t_skip shellcheck "the VM is not running (start the lab to include it)"
+  fi
+
+  if [ "$T_FAILS" -eq 0 ]; then ok "selftest: all checks passed"; else warn "selftest: $T_FAILS check(s) failed"; return 1; fi
+}
+
+cmd_smoke() {
+  require_lab
+  cluster_exists || die "No cluster yet. Start the lab with ./cks (or ./cks up) first."
+  say "Smoke test of the running lab (about 2-3 min). It creates and removes the namespaces cks-smoke*; nodes are only read."
+  local rc=0
+  audit_local || rc=1
+  lock
+  p exec -i -w "$ROOT" -e CKS_ROOT="$ROOT" -e CKS_TOOLBOX_IMAGE="$(p inspect -f '{{.ImageName}}' "$TOOLBOX")" \
+    "$TOOLBOX" bash "$ROOT/lab/tests/smoke.sh" || rc=1
+  unlock
+  return "$rc"
+}
+
 cmd_addon() {
   case "${1:-}" in
     falco) ;;
@@ -830,6 +919,8 @@ ${B}cks${N} - local CKS practice lab (Podman VM "$MACHINE", kind cluster "$CLUST
   ./cks down                 destroy the cluster and toolbox, stop the VM
   ./cks purge [--yes]        remove the VM and every cached image (sessions/ stay)
   ./cks verify-local         prove that nothing is exposed beyond 127.0.0.1
+  ./cks selftest             static checks of the repo (syntax, guards, privacy); no lab needed
+  ./cks smoke                functional check of the running lab (about 2-3 min)
 
 Logs: .cks/logs/   Install/permissions/uninstall: quick-start.md
 EOF
@@ -847,6 +938,8 @@ case "${1:-}" in
   down)            shift; cmd_down ;;
   purge)           shift; cmd_purge "$@" ;;
   verify-local)    shift; find_podman || true; audit_local ;;
+  selftest)        shift; cmd_selftest ;;
+  smoke)           shift; cmd_smoke ;;
   session-end)     shift; cmd_session_end ;;
   help|-h|--help)  cmd_help ;;
   *)               cmd_help >&2; exit 2 ;;

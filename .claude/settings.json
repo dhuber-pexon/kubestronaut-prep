@@ -17,7 +17,9 @@
       "Bash(./cks seed *)",
       "Bash(./cks addon *)",
       "Bash(./cks verify-local *)",
-      "Bash(./cks help *)"
+      "Bash(./cks help *)",
+      "Bash(./cks selftest *)",
+      "Bash(./cks smoke *)"
     ],
     "ask": [
       "Bash(./cks reset *)",
