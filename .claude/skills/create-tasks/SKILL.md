@@ -48,6 +48,7 @@ sessions/<YYYYMMDD-HHMM>-drill/
       work/                  # empty folder, create it with mkdir: the learner's space (never write files here)
       .meta/rubric.md        # from templates/rubric.md: observable checks only
       .meta/seed.sh          # optional, from templates/seed.sh: idempotent lab setup
+      .meta/snapshot.conf    # from templates/snapshot.conf: what to save for /grade when the lab is torn down
 ```
 
 - Starter files go in `given/`, **never** in `work/`.
@@ -74,6 +75,13 @@ sessions/<YYYYMMDD-HHMM>-drill/
   (get, describe, auth can-i, grep, cat, ls, crictl ps / inspect). The cks-grader subagent can run nothing else.
 - Mark file-graded items explicitly (AppArmor, gVisor runtime, Cilium/Istio encryption, kubeadm upgrade).
 - List 2 common traps.
+
+## Snapshot config
+
+Every task gets `.meta/snapshot.conf` from [templates/snapshot.conf](templates/snapshot.conf): the task's namespaces, plus
+every node file the rubric checks beyond the defaults (kube-apiserver manifest and kubelet configs are always saved).
+Before the cluster is destroyed, `./cks` saves exactly that into `sessions/<id>/.lab-snapshot/`, and `/grade` uses it when the
+lab is off. Never list key material (`*/pki/*`, `*.key`, `*.pem`); it is refused anyway.
 
 ## Seeding
 

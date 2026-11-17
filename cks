@@ -511,8 +511,21 @@ start_reaper() {
     "$img" cks-teardown >/dev/null 2>&1 || true
 }
 
+# Saves the live state of the active session into sessions/<id>/.lab-snapshot/ before the cluster is
+# destroyed, so /grade can still grade live work afterwards (lab/snapshot.sh). Never fails the caller.
+snapshot_active() {   # $1 = reason
+  local s
+  s="$(active_session)"
+  if [ -z "$s" ] || [ ! -d "$ROOT/$s/tasks" ]; then return 0; fi
+  if ! toolbox_running || ! cluster_exists; then return 0; fi
+  say "Saving a snapshot of the live state of ${s}…"
+  p exec -i -e CKS_ROOT="$ROOT" "$TOOLBOX" timeout 90 bash "$ROOT/lab/snapshot.sh" "$ROOT/$s" "$1" 2>&1 \
+    || warn "snapshot failed; /grade falls back to the work/ files"
+}
+
 teardown_locked() {   # caller holds the lock
   if [ "$(machine_state)" = running ] && engine_up; then
+    snapshot_active teardown
     say "Deleting the cluster and the toolbox…"
     start_reaper
     p wait "$REAPER" >/dev/null 2>&1 || true
@@ -549,7 +562,9 @@ cmd_up() {   # $1 = shell (called by the owner terminal) | detached
     if [ "$mode" = shell ]; then
       case "$(creator)" in
         detached|kept) ok "Taking over the running lab cluster." ;;
-        *) say "Found a leftover cluster from an earlier session; rebuilding it fresh."; delete_cluster ;;
+        *) say "Found a leftover cluster from an earlier session; rebuilding it fresh."
+           snapshot_active leftover
+           delete_cluster ;;
       esac
     fi
   fi
@@ -733,13 +748,16 @@ cmd_seed() {
 
 cmd_reset() {   # [$1 = session to make active first]
   need_podman
-  if [ $# -ge 1 ]; then record_session "$1"; fi
   local prev; prev="$(creator)"
   if [ "$(machine_state)" = running ] && engine_up && toolbox_running; then
     lock
+    snapshot_active reset                            # the session that was active until now
+    if [ $# -ge 1 ]; then record_session "$1"; fi
     say "Deleting the cluster…"
     delete_cluster
     unlock
+  elif [ $# -ge 1 ]; then
+    record_session "$1"
   fi
   cmd_up detached          # creates a fresh cluster and re-seeds the active session
   if owner_alive; then echo shell > "$RUN/cluster-creator"
@@ -797,7 +815,7 @@ first3() { printf '%s\n' "$1" | head -3 | cut -c1-120 | tr '\n' ' '; }
 
 shell_files() {   # every shell script of the repo, as relative paths
   {
-    ls cks .claude/hooks/*.sh lab/tests/*.sh .claude/skills/create-tasks/templates/seed.sh 2>/dev/null
+    ls cks .claude/hooks/*.sh lab/*.sh lab/tests/*.sh .claude/skills/create-tasks/templates/seed.sh 2>/dev/null
     find lab/toolbox/rootfs lab/node/rootfs -type f \( -path '*/bin/*' -o -name '*.sh' -o -name .bashrc \) 2>/dev/null
   } | LC_ALL=C sort -u
 }

@@ -41,8 +41,10 @@ Not needed: Docker Desktop, Homebrew, kubectl, kind, helm, trivy, Python package
   Your `sessions/` and `state/` files stay. Closing the terminal tab does the same.
 - `n` at the prompt takes you back to the shell. Ctrl-D is ignored ("Use logout to leave the shell"), so you can't leave by accident.
 - `CKS_KEEP=1 ./cks` keeps the lab running after you leave. Destroy it later with `./cks down`.
+- Right before the lab is destroyed, the live state of your active session is saved to `sessions/<id>/.lab-snapshot/`
+  (Secret values and keys are never saved). `/grade` uses it while the lab is off, so you can grade after leaving.
 - Starting again with `./cks` builds a fresh cluster and re-applies the seeds of your active session. Re-apply your `work/`
-  if you want to `/grade` live state again.
+  if you want to keep working on the live state.
 
 ## Nothing to do (automatic)
 

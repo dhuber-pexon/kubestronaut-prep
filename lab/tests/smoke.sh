@@ -81,6 +81,28 @@ YAML
 
   sc="$(kubectl -n "$NS" exec hardened -- grep '^Seccomp:' /proc/1/status 2>&1 | tr -s ' \t' ' ')"
   if [ "$sc" = "Seccomp: 2" ]; then ok seccomp-runtimedefault "filter active in the container"; else bad seccomp-runtimedefault "$sc"; fi
+
+  # Snapshot of live state (lab/snapshot.sh) on a throwaway session in /tmp. A Secret with a known value
+  # must never be captured, and key material must be refused even when a task lists it.
+  kubectl -n "$NS" create secret generic smoke-secret --from-literal=password=smoke-secret-value >/dev/null
+  ss=/tmp/cks-smoke-session
+  rm -rf "$ss"
+  mkdir -p "$ss/tasks/01-smoke/.meta"
+  echo "# smoke" > "$ss/tasks/01-smoke/TASK.md"
+  printf 'namespaces=%s\nnode_files=cks-control-plane:/etc/kubernetes/pki/ca.key\n' "$NS" > "$ss/tasks/01-smoke/.meta/snapshot.conf"
+  bash "$ROOT/lab/snapshot.sh" "$ss" smoke >/dev/null 2>&1
+  snap="$ss/.lab-snapshot"
+  b64="$(printf smoke-secret-value | base64)"
+  if [ -f "$snap/tasks/01-smoke/ns-$NS.yaml" ] && grep -q 'name: web' "$snap/tasks/01-smoke/ns-$NS.yaml" \
+     && grep -q 'smoke-secret type=Opaque keys=password' "$snap/tasks/01-smoke/ns-$NS.secrets.txt" \
+     && [ -s "$snap/nodes/cks-control-plane/etc/kubernetes/manifests/kube-apiserver.yaml" ] \
+     && ! grep -rqF -e smoke-secret-value -e "$b64" "$snap" \
+     && [ ! -e "$snap/nodes/cks-control-plane/etc/kubernetes/pki/ca.key" ]; then
+    ok snapshot "objects + node files saved; Secret value and key material excluded"
+  else
+    bad snapshot "unexpected content in $snap"
+  fi
+  rm -rf "$ss"
 else
   bad workloads "pods not Ready within 180 s"
 fi

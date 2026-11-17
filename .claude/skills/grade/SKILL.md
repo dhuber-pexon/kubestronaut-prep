@@ -19,16 +19,31 @@ Grade the learner's work. **Never paste a full solution**; that is `/explain-sol
 
 ## Allowed
 
-- Read `TASK.md`, `given/**`, `work/**`, `.meta/rubric.md`, `.meta/seed.sh`, and `state/progress.md`.
+- Read `TASK.md`, `given/**`, `work/**`, `.meta/rubric.md`, `.meta/seed.sh`, `state/progress.md`, and the session's
+  `.lab-snapshot/**` (live state saved when the lab was last torn down; see below).
 - Run read-only live probes from the rubric through `./cks kubectl …` and `./cks node <node> -- …`.
 - **Never** edit `work/`, `TASK.md` or `given/`. Never change the cluster while grading; no apply, delete or edit.
-- Never start the lab. If it isn't running (check the SessionStart line or `./cks status --brief`), grade from files only and say so.
+- Never start the lab. Check its state first (SessionStart line or `./cks status --brief`).
+
+## Evidence sources, in this order
+
+1. **Lab running** → live probes ("Mode: files + live lab").
+2. **Lab not running, `sessions/<id>/.lab-snapshot/` exists** → evaluate each probe's intent against the snapshot
+   ("Mode: files + snapshot (taken <time from SNAPSHOT.md>)"):
+   - task objects: `.lab-snapshot/tasks/<nn-slug>/ns-<ns>.yaml` (namespace labels included), `ns-<ns>.missing` = namespace absent;
+     Secrets only as names/types/key names in `ns-<ns>.secrets.txt`
+   - cluster-wide: `cluster.yaml` (admission policies, RuntimeClasses), `cluster-rbac.yaml` (non-default ClusterRoles/Bindings)
+   - node files: `nodes/<node>/<absolute path>` (kube-apiserver manifest, kubelet configs, files from `.meta/snapshot.conf`)
+   - Derive what a probe would have returned (e.g. `auth can-i` from the Role/RoleBinding YAML). If the snapshot can't decide
+     an item (runtime behaviour, a file that wasn't captured), mark it **unclear**, never fail.
+   - If files in `work/` are newer than the snapshot, say so: the live state may not include the learner's latest work.
+3. **Neither** → files only ("Mode: files only").
 
 ## Single task
 
 1. Read `TASK.md`, then `.meta/rubric.md`.
 2. Inspect everything under `work/` (manifests, `commands.sh`, saved copies of node files).
-3. If the lab runs, execute the rubric's live probes one by one.
+3. Execute the rubric's live probes one by one, or evaluate them against the snapshot (see evidence sources).
    - A probe that finds no object, while the matching file in `work/` is correct, usually means the lab was
      rebuilt since the learner applied it. Mark the item **unclear**, and tell them to re-apply `work/` and `/grade` again.
 4. Mark each item **pass** / **fail** / **unclear** with evidence (file and line, or probe output).
@@ -37,7 +52,7 @@ Grade the learner's work. **Never paste a full solution**; that is `/explain-sol
 ## Whole session / mock exam
 
 Delegate: start one **cks-grader** subagent per task, **in parallel** (one message, several Agent calls).
-Give each the task path and whether the lab is running. Then merge their verdicts, compute the total out of 100
+Give each the task path and the evidence source (lab running, or the snapshot path and time, or files only). Then merge their verdicts, compute the total out of 100
 (pass at 67), fill the scoring sheet and the domain breakdown in `sessions/<id>/SESSION.md`, and report.
 Never put solutions into `SESSION.md`.
 
@@ -45,7 +60,7 @@ Never put solutions into `SESSION.md`.
 
 ```markdown
 ## Grade: <nn-slug> — PASS | PARTIAL | FAIL (<earned>/<possible> pts)
-**Mode:** files + live lab | files only
+**Mode:** files + live lab | files + snapshot (taken <time>) | files only
 
 ### Must-pass
 - [x] … (evidence)

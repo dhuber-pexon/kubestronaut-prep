@@ -208,7 +208,13 @@ No feature may publish a port, write outside this folder, or need an account.
 - **Test:** green on a fresh lab. Temporarily break one check (e.g. a wrong expected value) and confirm it turns red with a clear message.
 - **Constraints:** shellcheck runs with `--network none` and a read-only mount. Nothing is installed on the Mac.
 
-### B2 Keep live work across destroy-every-time
+### B2 Keep live work across destroy-every-time ✅ implemented (2026-11-17)
+
+> **Status:** `lab/snapshot.sh` runs before every teardown, reset and leftover rebuild (about 1 s) and writes
+> `sessions/<id>/.lab-snapshot/` per the task's `.meta/snapshot.conf` (fallback: `t<NN>-…` namespaces named in TASK.md).
+> Secret values, `*/pki/*`, `*.key`, `*.pem` are never saved; `secret:`/`token:`/`password:` values are redacted.
+> `/grade` and `cks-grader` grade "files + snapshot" when the lab is off. `./cks smoke` checks it (19 checks).
+> Not done: the optional `./cks reapply` (applying `work/` YAML blindly could create static-pod copies as Pods).
 
 - **Why:** every exit destroys the cluster, so `/grade` loses live evidence the learner created.
 - **Implement:**

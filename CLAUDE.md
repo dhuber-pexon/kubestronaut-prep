@@ -99,11 +99,12 @@ The `cks-grader` subagent ([.claude/agents/cks-grader.md](.claude/agents/cks-gra
 
 ```
 sessions/<id>/SESSION.md
+sessions/<id>/.lab-snapshot/   # live state saved before every teardown (lab/snapshot.sh); /grade uses it when the lab is off
 sessions/<id>/tasks/<nn>-<slug>/
   TASK.md        # scenario (never spoil)
   given/         # starter files (read-only for the learner)
   work/          # learner only
-  .meta/rubric.md  .meta/seed.sh  .meta/hint-level
+  .meta/rubric.md  .meta/seed.sh  .meta/snapshot.conf  .meta/hint-level
 ```
 
 Create sessions only via `/create-tasks` or `/exam-session`. Never commit session content or `state/progress.md`.
