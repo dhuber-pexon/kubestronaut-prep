@@ -756,11 +756,12 @@ cmd_down() {
 }
 
 cmd_session_end() {   # Claude Code SessionEnd hook: only tear down if no ./cks terminal owns the lab
-  if owner_alive; then return 0; fi
-  find_podman || return 0
-  [ "$(machine_state)" = running ] || return 0
-  if [ "$(creator)" = kept ]; then return 0; fi
+  if owner_alive; then say "kept: a ./cks terminal owns the lab"; return 0; fi
+  if ! find_podman; then say "nothing to do: Podman not installed"; return 0; fi
+  if [ "$(machine_state)" != running ]; then say "nothing to do: VM not running"; return 0; fi
+  if [ "$(creator)" = kept ]; then say "kept: lab started with CKS_KEEP"; return 0; fi
   detach "$ROOT/cks" down
+  say "teardown started in the background (log: .cks/logs/teardown.log)"
 }
 
 cmd_purge() {
