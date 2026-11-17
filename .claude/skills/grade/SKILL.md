@@ -37,6 +37,8 @@ Grade the learner's work. **Never paste a full solution**; that is `/explain-sol
    - Derive what a probe would have returned (e.g. `auth can-i` from the Role/RoleBinding YAML). If the snapshot can't decide
      an item (runtime behaviour, a file that wasn't captured), mark it **unclear**, never fail.
    - If files in `work/` are newer than the snapshot, say so: the live state may not include the learner's latest work.
+   - If an item fails in `.lab-snapshot/` but passes in `.lab-snapshot.prev/` (the lab run before), the live work was most
+     likely lost in a lab restart: mark it **unclear** (not fail) and tell the learner to re-apply `work/` and `/grade` again.
 3. **Neither** → files only ("Mode: files only").
 
 ## Single task

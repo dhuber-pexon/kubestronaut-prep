@@ -93,6 +93,9 @@ rm -f "$TMP/.node-files"
   if [ -n "$NOTES" ]; then printf '\n## Notes\n%s\n' "$NOTES"; fi
 } > "$TMP/SNAPSHOT.md"
 
-rm -rf "$OUT"
+# Keep the previous snapshot: after a restart without re-applying work/, the newest snapshot only shows
+# the seeded state, and /grade then uses .lab-snapshot.prev to mark lost live work as unclear, not failed.
+rm -rf "$OUT.prev"
+if [ -d "$OUT" ]; then mv "$OUT" "$OUT.prev"; fi
 mv "$TMP" "$OUT"
 echo "snapshot: $(find "$OUT" -type f | wc -l) files in ${OUT#"${CKS_ROOT:-}"/}"
