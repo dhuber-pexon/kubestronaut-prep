@@ -133,6 +133,7 @@ and it shares your whole home folder with its VM. The engine-specific code is on
 cks                    entry point (macOS bash 3.2, no other dependencies)
 quick-start.md         install, prompts, first run, uninstall
 CLAUDE.md              rules for Claude Code in this repo
+LICENSE.md             MIT licence
 lab/kind.yaml          cluster definition (API on 127.0.0.1, no port mappings)
 lab/toolbox/           toolbox image: pinned CLIs, exam bashrc, ssh/sudo shims, teardown
 lab/node/              node image: kindest/node v1.37 + vim, etcdctl, kube-bench, docker.io mirror
@@ -148,3 +149,8 @@ state/                 your progress (gitignored, except the example)
 ## Not in scope
 
 Copying kubernetes.io into this repo, leaked exam items, paid practice platforms, and committing your sessions.
+
+## Licence
+
+MIT, see [LICENSE.md](LICENSE.md). The tools the lab downloads keep their own licences
+(see [Open source components](#open-source-components)).
