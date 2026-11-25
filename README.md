@@ -133,7 +133,7 @@ and it shares your whole home folder with its VM. The engine-specific code is on
 cks                    entry point (macOS bash 3.2, no other dependencies)
 quick-start.md         install, prompts, first run, uninstall
 CLAUDE.md              rules for Claude Code in this repo
-LICENSE.md             MIT licence
+LICENSE.md             licence (PolyForm Noncommercial 1.0.0)
 lab/kind.yaml          cluster definition (API on 127.0.0.1, no port mappings)
 lab/toolbox/           toolbox image: pinned CLIs, exam bashrc, ssh/sudo shims, teardown
 lab/node/              node image: kindest/node v1.37 + vim, etcdctl, kube-bench, docker.io mirror
@@ -152,5 +152,6 @@ Copying kubernetes.io into this repo, leaked exam items, paid practice platforms
 
 ## Licence
 
-MIT, see [LICENSE.md](LICENSE.md). The tools the lab downloads keep their own licences
-(see [Open source components](#open-source-components)).
+PolyForm Noncommercial 1.0.0, see [LICENSE.md](LICENSE.md): free for personal study, learning, research and
+non-profit use. Commercial use (e.g. paid trainings) needs permission from the authors.
+The tools the lab downloads keep their own open source licences (see [Open source components](#open-source-components)).
