@@ -136,8 +136,13 @@ restore_default_conn() {   # $1 = default before init
 
 # Containers in the VM that ./cks did not create (only possible via the Podman default connection).
 foreign_containers() {
-  p ps -a --format '{{.Names}} {{index .Labels "io.cks.lab"}} {{index .Labels "io.x-k8s.kind.cluster"}}' 2>/dev/null \
-    | awk '$2!="true" && $2!="'"$CLUSTER"'" && $3!="'"$CLUSTER"'" {print $1}' | tr '\n' ' ' | sed 's/ $//' || true
+  local all ours
+  all="$(p ps -a --format '{{.Names}}' 2>/dev/null || true)"
+  [ -n "$all" ] || return 0
+  ours="$( { p ps -a --filter "label=$LABEL" --format '{{.Names}}'
+             p ps -a --filter "label=io.x-k8s.kind.cluster=$CLUSTER" --format '{{.Names}}'; } 2>/dev/null || true)"
+  printf '%s\n' "$all" | LC_ALL=C sort -u | LC_ALL=C comm -23 - <(printf '%s\n' "$ours" | LC_ALL=C sort -u) \
+    | tr '\n' ' ' | sed 's/ $//' || true
 }
 
 engine_up() { with_timeout 10 "$PODMAN" --connection "$CONN" info >/dev/null 2>&1; }
