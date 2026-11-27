@@ -119,6 +119,27 @@ upd_conn_flag() {
   if pm "$1" --help 2>/dev/null | grep -q -- '--update-connection'; then printf '%s' '--update-connection=false'; fi
 }
 
+# Podman makes the first connection the default even with --update-connection=false, so a
+# default that existed before init is restored afterwards. Other projects' defaults stay theirs.
+default_conn() { "$PODMAN" system connection list --format '{{.Name}} {{.Default}}' 2>/dev/null | awk '$2=="true"{print $1; exit}' || true; }
+is_lab_conn() { [ "$1" = "$MACHINE" ] || [ "$1" = "$CONN" ]; }
+restore_default_conn() {   # $1 = default before init
+  local prev="$1" now
+  [ -n "$prev" ] && ! is_lab_conn "$prev" || return 0
+  now="$(default_conn)"
+  if [ "$now" != "$prev" ]; then
+    "$PODMAN" system connection default "$prev" >>"$LOGS/machine.log" 2>&1 \
+      && ok "Kept your default Podman connection '$prev'" \
+      || warn "Podman made '$now' the default connection; switch back: podman system connection default $prev"
+  fi
+}
+
+# Containers in the VM that ./cks did not create (only possible via the Podman default connection).
+foreign_containers() {
+  p ps -a --format '{{.Names}} {{index .Labels "io.cks.lab"}} {{index .Labels "io.x-k8s.kind.cluster"}}' 2>/dev/null \
+    | awk '$2!="true" && $2!="'"$CLUSTER"'" && $3!="'"$CLUSTER"'" {print $1}' | tr '\n' ' ' | sed 's/ $//' || true
+}
+
 engine_up() { with_timeout 10 "$PODMAN" --connection "$CONN" info >/dev/null 2>&1; }
 
 wait_engine() {
@@ -148,6 +169,7 @@ ensure_machine() {
   local st; st="$(machine_state)"
   if [ "$st" = missing ]; then
     say "Creating the Podman VM '$MACHINE' (one time; downloads ~1 GB; it only sees this folder)…"
+    local prev_default; prev_default="$(default_conn)"
     # shellcheck disable=SC2046
     if ! pm init "$MACHINE" --rootful --cpus "$VM_CPUS" --memory "$VM_MEMORY_MB" --disk-size "$VM_DISK_GB" \
          --volume "$ROOT:$ROOT" $(upd_conn_flag init) >>"$LOGS/machine.log" 2>&1; then
@@ -155,15 +177,18 @@ ensure_machine() {
       die "podman machine init failed (log: .cks/logs/machine.log)."
     fi
     printf '%s\n' "$ROOT" > "$STATE/machine-root"
+    restore_default_conn "$prev_default"
     st="$(machine_state)"
   fi
   if [ "$st" != running ] && [ "$st" != starting ]; then
     say "Starting the Podman VM '$MACHINE'…"
+    local prev_start; prev_start="$(default_conn)"
     # shellcheck disable=SC2046
     if ! in_new_session "$PODMAN" machine start "$MACHINE" $(upd_conn_flag start) >>"$LOGS/machine.log" 2>&1; then
       tail -n 20 "$LOGS/machine.log" >&2
       die "podman machine start failed (log: .cks/logs/machine.log). Another Podman VM running? Check: podman machine list"
     fi
+    restore_default_conn "$prev_start"
   fi
   wait_engine
   check_folder_access
@@ -444,6 +469,8 @@ EOF
       esac
     done
   done
+  local fc; fc="$(foreign_containers)"
+  if [ -n "$fc" ]; then warn "containers in the VM not created by ./cks (audited above as well): $fc"; fi
   if [ "$bad" = 0 ]; then
     ok "local-only: only the API is published, on 127.0.0.1 (port${published:- none}); nothing else in the VM publishes a port"
     ok "local-only: the VM shares only this project folder with the Mac"
@@ -663,7 +690,15 @@ cmd_status() {
   fi
   say "${B}Owner shell${N}   $owner"
   say "${B}Active${N}        ${sess:-none}"
+  local dc; dc="$(default_conn)"
+  if [ -n "$dc" ] && is_lab_conn "$dc"; then
+    say "${B}Default conn${N}  $dc (a bare 'podman' from other projects lands in this VM; change: podman system connection default <name>)"
+  else
+    say "${B}Default conn${N}  ${dc:-none} (not the lab; ./cks always uses '$CONN')"
+  fi
   if [ "$st" != running ] || ! engine_up; then say "${B}Cluster${N}       not running (start: ./cks)"; return 0; fi
+  local fc; fc="$(foreign_containers)"
+  if [ -n "$fc" ]; then warn "containers in the VM not created by ./cks: $fc (teardown stops them with the VM; ./cks purge deletes them)"; fi
   if toolbox_running; then say "${B}Toolbox${N}       running ($(p inspect -f '{{.ImageName}}' "$TOOLBOX" 2>/dev/null))"
   else say "${B}Toolbox${N}       not running"; fi
   if cluster_exists && toolbox_running; then

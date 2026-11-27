@@ -92,6 +92,8 @@ Type `/create-tasks` with what you want to practise, for example `/create-tasks 
 | Cluster broken beyond repair (e.g. kube-apiserver won't come back) | `./cks reset` |
 | "The VM cannot read this project folder" | System Settings → Privacy & Security → Files and Folders → allow the Podman VM helper, then `./cks` |
 | "Another Podman VM is running" | `podman machine list`, then `podman machine stop <name>` |
+| `./cks status` shows `Default conn  cks-root` | Podman makes its first VM the default, so a bare `podman` from other projects lands in the lab VM. `./cks` itself never uses the default. Point it at your other VM: `podman system connection default <name>` (`./cks` keeps an existing default when it creates or starts its VM) |
+| "containers in the VM not created by ./cks" | Another project used the default connection (see above). They are audited by `./cks verify-local`, stopped with the VM, and deleted by `./cks purge` |
 | Logs | `.cks/logs/` |
 | All commands | `./cks help` |
 
